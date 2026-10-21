@@ -322,9 +322,9 @@ function renderBoard(boardData) {
 
     // Add Column Placeholder Card at the end
     html += `
-        <div class="add-column-card" id="btn-add-column-card" onclick="openNewColumnModal()">
-            <div style="width:40px; height:40px; border-radius:50%; background:rgba(99,102,241,0.15); display:flex; align-items:center; justify-content:center; color:var(--primary); font-size:1.4rem;">+</div>
-            <div style="font-weight:600; font-size:0.95rem;">Add New Column</div>
+        <div class="add-column-card" id="btn-add-column-card" onclick="openNewColumnModal()" title="Add another stage">
+            <div style="width:26px; height:26px; border-radius:var(--radius-sm); background:rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; color:var(--text-secondary); font-size:0.9rem; font-weight:600;">+</div>
+            <span style="font-weight:500; font-size:0.8rem; color:var(--text-secondary);">New Column</span>
         </div>
     `;
 
@@ -359,13 +359,13 @@ function renderTaskCards(tasks) {
 
             if (dueDay < today) {
                 dueStatus = 'overdue';
-                dueDateHtml = `<span class="badge badge-overdue">⚠️ ${dueFormatted}</span>`;
+                dueDateHtml = `<span class="task-due-date overdue">${dueFormatted}</span>`;
             } else if (dueDay.getTime() === today.getTime()) {
                 dueStatus = 'today';
-                dueDateHtml = `<span class="badge badge-today">📅 Due Today</span>`;
+                dueDateHtml = `<span class="task-due-date today">Today</span>`;
             } else {
                 dueStatus = 'upcoming';
-                dueDateHtml = `<span class="badge badge-due">📅 ${dueFormatted}</span>`;
+                dueDateHtml = `<span class="task-due-date">${dueFormatted}</span>`;
             }
         }
 
@@ -375,36 +375,52 @@ function renderTaskCards(tasks) {
             assigneesHtml = '<div class="avatar-group">';
             assignees.slice(0, 3).forEach(u => {
                 assigneesHtml += `
-                    <div class="avatar avatar-sm" style="background-color:${u.avatar_color || '#6366f1'};" title="${escapeHtml(u.username)}">
+                    <div class="avatar avatar-sm" style="background-color:${u.avatar_color || '#4f46e5'};" title="${escapeHtml(u.username)}">
                         ${u.username.substring(0, 2).toUpperCase()}
                     </div>
                 `;
             });
             if (assignees.length > 3) {
-                assigneesHtml += `<div class="avatar avatar-sm" style="background:#334155;">+${assignees.length - 3}</div>`;
+                assigneesHtml += `<div class="avatar avatar-sm" style="background:#272b3d;">+${assignees.length - 3}</div>`;
             }
             assigneesHtml += '</div>';
         }
 
-        return `
-            <div class="task-card" id="task-card-${task.id}" data-task-id="${task.id}" data-column-id="${task.column_id}" data-priority="${priority}" data-assignee-ids="${assigneeIds}" data-due-status="${dueStatus}" draggable="true">
-                <div class="card-meta-top">
-                    <span class="badge badge-priority-${priority}">${priority}</span>
-                    ${dueDateHtml}
-                </div>
+        // Comments Indicator (only if > 0)
+        let commentsHtml = '';
+        if (commentsCount > 0) {
+            commentsHtml = `
+                <span class="card-indicator-item" title="${commentsCount} comments">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.7;"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+                    <span>${commentsCount}</span>
+                </span>
+            `;
+        }
 
-                <div class="task-title">${escapeHtml(task.title)}</div>
-
-                ${task.description ? `<div class="task-desc-preview">${escapeHtml(task.description)}</div>` : ''}
-
-                <div class="card-meta-bottom">
-                    <div class="card-indicators">
-                        <span class="card-indicator-item" title="Comments">
-                            💬 <span>${commentsCount}</span>
-                        </span>
+        let metaBottomHtml = '';
+        if (commentsCount > 0 || assignees.length > 0) {
+            metaBottomHtml = `
+                <div class="task-card-footer card-meta-bottom">
+                    <div class="task-card-indicators card-indicators">
+                        ${commentsHtml}
                     </div>
                     ${assigneesHtml}
                 </div>
+            `;
+        }
+
+        return `
+            <div class="task-card" id="task-card-${task.id}" data-task-id="${task.id}" data-column-id="${task.column_id}" data-priority="${priority}" data-assignee-ids="${assigneeIds}" data-due-status="${dueStatus}" draggable="true">
+                <div class="task-card-header card-meta-top">
+                    <span class="priority-badge priority-${priority}">${priority}</span>
+                    ${dueDateHtml}
+                </div>
+
+                <div class="task-card-title task-title">${escapeHtml(task.title)}</div>
+
+                ${task.description ? `<div class="task-card-desc task-desc-preview">${escapeHtml(task.description)}</div>` : ''}
+
+                ${metaBottomHtml}
             </div>
         `;
     }).join('');

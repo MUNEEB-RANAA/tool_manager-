@@ -92,9 +92,9 @@ $unreadNotifs = (int)$stmtNotifs->fetchColumn();
     <title>Workspace Dashboard | Tool Manager</title>
     <meta name="csrf-token" content="<?php echo htmlspecialchars($currentUser['csrf_token']); ?>">
     <link rel="icon" type="image/svg+xml" href="assets/img/favicon.svg">
-    <link rel="stylesheet" href="assets/css/variables.css">
-    <link rel="stylesheet" href="assets/css/layout.css">
-    <link rel="stylesheet" href="assets/css/components.css">
+    <link rel="stylesheet" href="assets/css/variables.css?v=<?php echo filemtime(__DIR__ . '/assets/css/variables.css'); ?>">
+    <link rel="stylesheet" href="assets/css/layout.css?v=<?php echo filemtime(__DIR__ . '/assets/css/layout.css'); ?>">
+    <link rel="stylesheet" href="assets/css/components.css?v=<?php echo filemtime(__DIR__ . '/assets/css/components.css'); ?>">
 </head>
 <body>
 
@@ -105,20 +105,19 @@ $unreadNotifs = (int)$stmtNotifs->fetchColumn();
                 <img src="assets/img/logo.svg" alt="Tool Manager">
             </div>
             <span class="brand-title-text">Tool Manager</span>
-            <span class="brand-tag">Flow</span>
         </a>
 
         <div class="nav-center">
             <span class="realtime-badge" id="realtime-status-pill">
-                <span class="pulse-dot"></span> Live Synced
+                <span class="pulse-dot"></span> Live
             </span>
         </div>
 
         <div class="nav-actions">
             <!-- Notifications Dropdown -->
             <div class="dropdown-wrapper">
-                <button type="button" class="btn btn-secondary btn-icon" id="notif-dropdown-btn" title="Notifications" aria-label="Notifications" style="position:relative;">
-                    <span>🔔</span>
+                <button type="button" class="btn btn-ghost btn-xs btn-icon" id="notif-dropdown-btn" title="Notifications" aria-label="Notifications" style="position:relative; width:28px; height:28px;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
                     <span class="notif-counter" id="notif-badge" style="<?php echo $unreadNotifs > 0 ? '' : 'display:none;'; ?>">
                         <?php echo $unreadNotifs > 99 ? '99+' : $unreadNotifs; ?>
                     </span>
@@ -127,7 +126,7 @@ $unreadNotifs = (int)$stmtNotifs->fetchColumn();
                 <div class="dropdown-menu" id="notif-dropdown-menu">
                     <div class="dropdown-header">
                         <span>Notifications</span>
-                        <button type="button" class="btn btn-ghost btn-sm" id="btn-mark-notifs-read" style="font-size:0.75rem; padding:0.2rem 0.4rem;">Mark all read</button>
+                        <button type="button" class="btn btn-ghost btn-xs" id="btn-mark-notifs-read" style="font-size:0.7rem; padding:0.15rem 0.35rem;">Mark all read</button>
                     </div>
                     <div class="notification-list" id="notif-list-container">
                         <!-- Loaded via JS -->
@@ -136,18 +135,15 @@ $unreadNotifs = (int)$stmtNotifs->fetchColumn();
             </div>
 
             <!-- Current User Badge & Profile Modal Opener -->
-            <button type="button" class="btn btn-ghost" id="btn-user-profile" title="Account & Security Settings" style="padding:0.35rem 0.65rem; border-radius:var(--radius-md); display:flex; align-items:center; gap:0.65rem;">
-                <div class="avatar" id="nav-user-avatar" style="background-color:<?php echo htmlspecialchars($currentUser['avatar_color']); ?>;">
+            <button type="button" class="btn btn-ghost btn-xs" id="btn-user-profile" title="Account Settings" style="padding:0.2rem 0.5rem; display:flex; align-items:center; gap:0.45rem;">
+                <div class="avatar avatar-sm" id="nav-user-avatar" style="background-color:<?php echo htmlspecialchars($currentUser['avatar_color']); ?>;">
                     <?php echo strtoupper(substr($currentUser['username'], 0, 2)); ?>
                 </div>
-                <div style="display:flex; flex-direction:column; text-align:left;">
-                    <span id="nav-user-name" style="font-weight:700; font-size:0.875rem; line-height:1.2; color:var(--text-primary);"><?php echo htmlspecialchars($currentUser['username']); ?></span>
-                    <span style="font-size:0.725rem; color:var(--text-muted);">Settings ⚙️</span>
-                </div>
+                <span id="nav-user-name" style="font-weight:600; font-size:0.8rem; color:var(--text-primary);"><?php echo htmlspecialchars($currentUser['username']); ?></span>
             </button>
 
-            <a href="logout.php" class="btn btn-ghost btn-sm" title="Sign out" style="color:var(--text-muted); margin-left:0.25rem;">
-                Sign out
+            <a href="logout.php" class="btn btn-ghost btn-xs" title="Sign out" style="color:var(--text-muted); margin-left:0.25rem;">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
             </a>
         </div>
     </header>
@@ -159,12 +155,12 @@ $unreadNotifs = (int)$stmtNotifs->fetchColumn();
             <!-- Dashboard Welcome Banner -->
             <div class="dashboard-header">
                 <div class="dashboard-title-group">
-                    <h1>Workspace Dashboard</h1>
-                    <p>Welcome back, <strong style="color:var(--text-primary);"><?php echo htmlspecialchars($currentUser['username']); ?></strong> 👋 — Orchestrate your projects with Tool Manager Flow</p>
+                    <h1>Projects</h1>
+                    <p>Workspace overview and active development boards</p>
                 </div>
                 <div style="display:flex; align-items:center; gap:0.75rem;">
-                    <button type="button" class="btn btn-flow" id="btn-new-project">
-                        <span style="font-size:1.1rem; line-height:1;">+</span>
+                    <button type="button" class="btn btn-primary" id="btn-new-project" style="height:32px; font-size:0.8rem;">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                         <span>New Project</span>
                     </button>
                 </div>
@@ -177,31 +173,39 @@ $unreadNotifs = (int)$stmtNotifs->fetchColumn();
                         <div class="stat-label">Total Projects</div>
                         <div class="stat-value"><?php echo $totalProjects; ?></div>
                     </div>
-                    <div class="stat-icon" style="background:rgba(99,102,241,0.15); color:var(--primary);">📁</div>
+                    <div class="stat-icon" style="background:rgba(79,70,229,0.12); color:var(--primary);">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+                    </div>
                 </div>
 
                 <div class="stat-card">
                     <div class="stat-info">
-                        <div class="stat-label">Pending Assigned Tasks</div>
+                        <div class="stat-label">Assigned Tasks</div>
                         <div class="stat-value"><?php echo $pendingAssignedTasks; ?></div>
                     </div>
-                    <div class="stat-icon" style="background:rgba(6,182,212,0.15); color:var(--accent-cyan);">⚡</div>
+                    <div class="stat-icon" style="background:rgba(56,189,248,0.12); color:var(--accent-cyan);">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
+                    </div>
                 </div>
 
                 <div class="stat-card">
                     <div class="stat-info">
-                        <div class="stat-label">High Priority Tasks</div>
+                        <div class="stat-label">High Priority</div>
                         <div class="stat-value"><?php echo $urgentTasks; ?></div>
                     </div>
-                    <div class="stat-icon" style="background:rgba(239,68,68,0.15); color:var(--danger);">🔥</div>
+                    <div class="stat-icon" style="background:rgba(239,68,68,0.12); color:var(--danger);">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+                    </div>
                 </div>
 
                 <div class="stat-card">
                     <div class="stat-info">
-                        <div class="stat-label">Flow Stream</div>
-                        <div class="stat-value" style="font-size:1.35rem; color:#10b981;">Online</div>
+                        <div class="stat-label">Live Sync</div>
+                        <div class="stat-value" style="font-size:1.15rem; color:#10b981; font-weight:600;">Active</div>
                     </div>
-                    <div class="stat-icon" style="background:rgba(16,185,129,0.15); color:var(--success);">🌐</div>
+                    <div class="stat-icon" style="background:rgba(16,185,129,0.12); color:var(--success);">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                    </div>
                 </div>
             </div>
 
@@ -506,8 +510,8 @@ $unreadNotifs = (int)$stmtNotifs->fetchColumn();
     </div>
 
     <!-- Global Client Scripts -->
-    <script src="assets/js/api.js"></script>
-    <script src="assets/js/dashboard.js"></script>
-    <script src="assets/js/real_time.js"></script>
+    <script src="assets/js/api.js?v=<?php echo filemtime(__DIR__ . '/assets/js/api.js'); ?>"></script>
+    <script src="assets/js/dashboard.js?v=<?php echo filemtime(__DIR__ . '/assets/js/dashboard.js'); ?>"></script>
+    <script src="assets/js/real_time.js?v=<?php echo filemtime(__DIR__ . '/assets/js/real_time.js'); ?>"></script>
 </body>
 </html>

@@ -130,32 +130,33 @@ $initialStateJson = json_encode([
     <title><?php echo htmlspecialchars($project['name']); ?> | Tool Manager</title>
     <meta name="csrf-token" content="<?php echo htmlspecialchars($currentUser['csrf_token']); ?>">
     <link rel="icon" type="image/svg+xml" href="assets/img/favicon.svg">
-    <link rel="stylesheet" href="assets/css/variables.css">
-    <link rel="stylesheet" href="assets/css/layout.css">
-    <link rel="stylesheet" href="assets/css/components.css">
-    <link rel="stylesheet" href="assets/css/kanban.css">
+    <link rel="stylesheet" href="assets/css/variables.css?v=<?php echo filemtime(__DIR__ . '/assets/css/variables.css'); ?>">
+    <link rel="stylesheet" href="assets/css/layout.css?v=<?php echo filemtime(__DIR__ . '/assets/css/layout.css'); ?>">
+    <link rel="stylesheet" href="assets/css/components.css?v=<?php echo filemtime(__DIR__ . '/assets/css/components.css'); ?>">
+    <link rel="stylesheet" href="assets/css/kanban.css?v=<?php echo filemtime(__DIR__ . '/assets/css/kanban.css'); ?>">
 </head>
-<body>
+<body class="board-view">
 
-    <!-- Main Navigation Bar -->
+    <!-- Top Navigation Bar -->
     <header class="navbar">
-        <div style="display:flex; align-items:center; gap:1.15rem; flex-wrap:wrap;">
-            <a href="dashboard.php" class="nav-brand">
+        <div class="nav-left">
+            <a href="dashboard.php" class="nav-brand" title="Back to Projects Dashboard">
                 <div class="brand-icon-wrap">
                     <img src="assets/img/logo.svg" alt="Tool Manager">
                 </div>
                 <span class="brand-title-text">Tool Manager</span>
-                <span class="brand-tag">Flow</span>
             </a>
-            <span style="color:var(--text-muted); font-size:1.1rem;">/</span>
-            <div style="display:flex; align-items:center; gap:0.55rem;">
-                <span id="board-project-title" style="font-weight:700; font-size:1.05rem; color:var(--text-primary);"><?php echo htmlspecialchars($project['name']); ?></span>
-                <span class="badge" style="background:<?php echo $isOwner ? 'rgba(99,102,241,0.15)' : 'rgba(6,182,212,0.15)'; ?>; color:<?php echo $isOwner ? 'var(--primary)' : 'var(--accent-cyan)'; ?>; font-size:0.65rem;">
+            <span class="nav-divider">/</span>
+            <div class="nav-project-crumb">
+                <span id="board-project-title" class="nav-project-name" title="<?php echo htmlspecialchars($project['name']); ?>">
+                    <?php echo htmlspecialchars($project['name']); ?>
+                </span>
+                <span class="role-badge">
                     <?php echo $isOwner ? 'Owner' : ($isAdmin ? 'Admin' : 'Member'); ?>
                 </span>
                 <?php if ($isAdmin): ?>
-                    <button type="button" class="btn btn-ghost btn-sm btn-icon" id="btn-edit-project-header" title="Edit Project Details" aria-label="Edit Project">
-                        <span>✏️</span>
+                    <button type="button" class="btn btn-ghost btn-xs btn-icon" id="btn-edit-project-header" title="Rename or Edit Project" aria-label="Edit Project">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
                     </button>
                 <?php endif; ?>
             </div>
@@ -163,29 +164,29 @@ $initialStateJson = json_encode([
 
         <div class="nav-center">
             <span class="realtime-badge" id="realtime-status-pill">
-                <span class="pulse-dot"></span> Live Synced
+                <span class="pulse-dot"></span> Live
             </span>
         </div>
 
         <div class="nav-actions">
             <!-- Team Avatars Stack & Management -->
-            <div style="display:flex; align-items:center; gap:0.5rem; margin-right:0.5rem;">
+            <div style="display:flex; align-items:center; gap:0.35rem; margin-right:0.35rem;">
                 <div class="avatar-group" id="board-avatar-group">
-                    <?php foreach (array_slice($members, 0, 4) as $m): ?>
+                    <?php foreach (array_slice($members, 0, 3) as $m): ?>
                         <div class="avatar avatar-sm" style="background-color:<?php echo htmlspecialchars($m['avatar_color']); ?>;" title="<?php echo htmlspecialchars($m['username']) . ' (' . $m['role'] . ')'; ?>">
                             <?php echo strtoupper(substr($m['username'], 0, 2)); ?>
                         </div>
                     <?php endforeach; ?>
-                    <?php if (count($members) > 4): ?>
-                        <div class="avatar avatar-sm" style="background:#334155;">+<?php echo count($members) - 4; ?></div>
+                    <?php if (count($members) > 3): ?>
+                        <div class="avatar avatar-sm" style="background:#262b3d;">+<?php echo count($members) - 3; ?></div>
                     <?php endif; ?>
                 </div>
 
                 <?php if ($isAdmin): ?>
-                    <button type="button" class="btn btn-secondary btn-sm" id="btn-manage-team-roster" title="Manage Team Roster">
-                        👥 Team
+                    <button type="button" class="btn btn-secondary btn-xs" id="btn-manage-team-roster" title="Manage Members">
+                        Team
                     </button>
-                    <button type="button" class="btn btn-secondary btn-sm" id="btn-open-invite-board" title="Invite User">
+                    <button type="button" class="btn btn-secondary btn-xs" id="btn-open-invite-board" title="Invite User">
                         + Invite
                     </button>
                 <?php endif; ?>
@@ -193,8 +194,8 @@ $initialStateJson = json_encode([
 
             <!-- Notifications Dropdown -->
             <div class="dropdown-wrapper">
-                <button type="button" class="btn btn-secondary btn-icon" id="notif-dropdown-btn" title="Notifications" aria-label="Notifications" style="position:relative;">
-                    <span>🔔</span>
+                <button type="button" class="btn btn-ghost btn-xs btn-icon" id="notif-dropdown-btn" title="Notifications" aria-label="Notifications" style="position:relative; width:26px; height:26px;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
                     <span class="notif-counter" id="notif-badge" style="<?php echo $unreadNotifs > 0 ? '' : 'display:none;'; ?>">
                         <?php echo $unreadNotifs > 99 ? '99+' : $unreadNotifs; ?>
                     </span>
@@ -203,7 +204,7 @@ $initialStateJson = json_encode([
                 <div class="dropdown-menu" id="notif-dropdown-menu">
                     <div class="dropdown-header">
                         <span>Notifications</span>
-                        <button type="button" class="btn btn-ghost btn-sm" id="btn-mark-notifs-read" style="font-size:0.75rem; padding:0.2rem 0.4rem;">Mark all read</button>
+                        <button type="button" class="btn btn-ghost btn-xs" id="btn-mark-notifs-read" style="font-size:0.7rem; padding:0.15rem 0.35rem;">Mark all read</button>
                     </div>
                     <div class="notification-list" id="notif-list-container">
                         <!-- Populated by JS -->
@@ -212,32 +213,34 @@ $initialStateJson = json_encode([
             </div>
 
             <!-- User Avatar & Profile Modal -->
-            <button type="button" class="btn btn-ghost" id="btn-user-profile" title="Account Settings" style="padding:0.25rem 0.5rem; display:flex; align-items:center; gap:0.5rem;">
+            <button type="button" class="btn btn-ghost btn-xs" id="btn-user-profile" title="Account Settings" style="padding:0.15rem 0.35rem; display:flex; align-items:center; gap:0.35rem;">
                 <div class="avatar avatar-sm" id="nav-user-avatar" style="background-color:<?php echo htmlspecialchars($currentUser['avatar_color']); ?>;">
                     <?php echo strtoupper(substr($currentUser['username'], 0, 2)); ?>
                 </div>
             </button>
 
             <!-- Dashboard Link & Sign Out -->
-            <div style="display:flex; align-items:center; gap:0.4rem; margin-left:0.25rem;">
-                <a href="dashboard.php" class="btn btn-ghost btn-sm" title="Back to Dashboard">Dashboard</a>
-                <a href="logout.php" class="btn btn-ghost btn-sm" title="Sign out" style="color:var(--text-muted);">Sign out</a>
+            <div style="display:flex; align-items:center; gap:0.25rem; margin-left:0.25rem;">
+                <a href="dashboard.php" class="btn btn-ghost btn-xs" title="Back to Dashboard">Dashboard</a>
+                <a href="logout.php" class="btn btn-ghost btn-xs" title="Sign out" style="color:var(--text-muted);">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+                </a>
             </div>
         </div>
     </header>
 
-    <!-- Sub-Navbar: Multi-Dimensional Filter and Board Actions -->
+    <!-- Sub-Navbar: Filters & Board Actions Toolbar -->
     <div class="board-subnav">
-        <div class="board-title-area" style="flex-wrap:wrap; gap:0.65rem;">
+        <div class="board-title-area">
             <!-- Search tasks input -->
-            <div style="width:200px;">
-                <input type="text" id="board-search-input" class="form-control" placeholder="🔍 Search tasks..." style="padding:0.4rem 0.75rem; font-size:0.8rem;" aria-label="Search board tasks">
+            <div style="width:160px;">
+                <input type="text" id="board-search-input" class="form-control" placeholder="Search tasks..." style="padding:0.3rem 0.6rem; font-size:0.75rem; height:28px;" aria-label="Search board tasks">
             </div>
 
             <!-- Priority Filter Dropdown -->
-            <div style="width:135px;">
-                <select id="board-priority-filter" class="form-select" style="padding:0.4rem 1.8rem 0.4rem 0.75rem; font-size:0.8rem;" aria-label="Filter by priority">
-                    <option value="all">All Priorities</option>
+            <div style="width:105px;">
+                <select id="board-priority-filter" class="form-select" style="padding:0.3rem 1.4rem 0.3rem 0.55rem; font-size:0.75rem; height:28px;" aria-label="Filter by priority">
+                    <option value="all">Priority</option>
                     <option value="urgent">Urgent</option>
                     <option value="high">High</option>
                     <option value="medium">Medium</option>
@@ -246,9 +249,9 @@ $initialStateJson = json_encode([
             </div>
 
             <!-- Assignee Filter Dropdown -->
-            <div style="width:145px;">
-                <select id="board-assignee-filter" class="form-select" style="padding:0.4rem 1.8rem 0.4rem 0.75rem; font-size:0.8rem;" aria-label="Filter by assignee">
-                    <option value="all">All Assignees</option>
+            <div style="width:115px;">
+                <select id="board-assignee-filter" class="form-select" style="padding:0.3rem 1.4rem 0.3rem 0.55rem; font-size:0.75rem; height:28px;" aria-label="Filter by assignee">
+                    <option value="all">Assignee</option>
                     <option value="me">Assigned to Me</option>
                     <?php foreach ($members as $m): ?>
                         <option value="<?php echo $m['id']; ?>"><?php echo htmlspecialchars($m['username']); ?></option>
@@ -257,24 +260,24 @@ $initialStateJson = json_encode([
             </div>
 
             <!-- Due Filter Dropdown -->
-            <div style="width:130px;">
-                <select id="board-due-filter" class="form-select" style="padding:0.4rem 1.8rem 0.4rem 0.75rem; font-size:0.8rem;" aria-label="Filter by due status">
-                    <option value="all">All Dates</option>
+            <div style="width:105px;">
+                <select id="board-due-filter" class="form-select" style="padding:0.3rem 1.4rem 0.3rem 0.55rem; font-size:0.75rem; height:28px;" aria-label="Filter by due status">
+                    <option value="all">Due Date</option>
                     <option value="overdue">Overdue</option>
                     <option value="today">Due Today</option>
                     <option value="upcoming">Upcoming</option>
                 </select>
             </div>
 
-            <button type="button" class="btn btn-ghost btn-sm" id="btn-clear-filters" style="display:none; font-size:0.75rem; padding:0.35rem 0.65rem; color:var(--text-muted);" title="Reset filters">
+            <button type="button" class="btn btn-ghost btn-xs" id="btn-clear-filters" style="display:none; color:var(--text-muted);" title="Reset filters">
                 Clear ✕
             </button>
         </div>
 
         <div class="board-actions">
             <?php if ($isAdmin): ?>
-                <button type="button" class="btn btn-secondary btn-sm" onclick="openNewColumnModal()">
-                    <span>+ Add Column</span>
+                <button type="button" class="btn btn-secondary btn-xs" onclick="openNewColumnModal()" style="height:28px;">
+                    <span>+ New Column</span>
                 </button>
             <?php endif; ?>
         </div>
@@ -590,10 +593,10 @@ $initialStateJson = json_encode([
     </div>
 
     <!-- Load Client Scripts in Sequence -->
-    <script src="assets/js/api.js"></script>
-    <script src="assets/js/dashboard.js"></script>
-    <script src="assets/js/kanban.js"></script>
-    <script src="assets/js/real_time.js"></script>
+    <script src="assets/js/api.js?v=<?php echo filemtime(__DIR__ . '/assets/js/api.js'); ?>"></script>
+    <script src="assets/js/dashboard.js?v=<?php echo filemtime(__DIR__ . '/assets/js/dashboard.js'); ?>"></script>
+    <script src="assets/js/kanban.js?v=<?php echo filemtime(__DIR__ . '/assets/js/kanban.js'); ?>"></script>
+    <script src="assets/js/real_time.js?v=<?php echo filemtime(__DIR__ . '/assets/js/real_time.js'); ?>"></script>
 
     <!-- Initial Board State Hydration & Deep-linking -->
     <script>
