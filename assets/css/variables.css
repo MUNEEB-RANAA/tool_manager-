@@ -1,0 +1,83 @@
+/**
+ * Tool Manager - Design Tokens & Theme Variables
+ * Modern Dark Aesthetic with Vibrant Cyan/Indigo/Purple Flow Gradients
+ */
+
+:root {
+    /* Color Palette - Premium Dark Theme */
+    --bg-primary: #0a0c16;
+    --bg-secondary: #121526;
+    --bg-surface: #1a1e36;
+    --bg-surface-hover: #222744;
+    --card-bg: rgba(26, 30, 54, 0.85);
+    --card-hover: rgba(34, 39, 68, 0.95);
+    --card-border: rgba(255, 255, 255, 0.08);
+    --card-border-hover: rgba(99, 102, 241, 0.45);
+
+    /* Accents & Brand Gradients */
+    --primary: #6366f1;
+    --primary-hover: #4f46e5;
+    --primary-light: rgba(99, 102, 241, 0.15);
+    --primary-glow: rgba(99, 102, 241, 0.35);
+
+    --accent-cyan: #06b6d4;
+    --accent-purple: #a855f7;
+    --accent-pink: #ec4899;
+    --accent-blue: #3b82f6;
+
+    /* Signature Flow Gradients */
+    --gradient-flow: linear-gradient(135deg, #00f2fe 0%, #4facfe 40%, #6366f1 75%, #a855f7 100%);
+    --gradient-primary: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #d946ef 100%);
+    --gradient-surface: linear-gradient(180deg, rgba(26, 30, 54, 0.8) 0%, rgba(18, 21, 38, 0.95) 100%);
+    --gradient-hero: radial-gradient(circle at 50% 0%, rgba(99, 102, 241, 0.18) 0%, rgba(6, 182, 212, 0.1) 40%, transparent 70%);
+
+    /* Semantic States */
+    --success: #10b981;
+    --success-bg: rgba(16, 185, 129, 0.14);
+    --warning: #f59e0b;
+    --warning-bg: rgba(245, 158, 11, 0.14);
+    --danger: #ef4444;
+    --danger-bg: rgba(239, 68, 68, 0.14);
+    --info: #0ea5e9;
+    --info-bg: rgba(14, 165, 233, 0.14);
+
+    /* Priority Colors */
+    --priority-low: #64748b;
+    --priority-medium: #06b6d4;
+    --priority-high: #f59e0b;
+    --priority-urgent: #ef4444;
+
+    /* Text Colors */
+    --text-primary: #f8fafc;
+    --text-secondary: #94a3b8;
+    --text-muted: #64748b;
+    --text-inverse: #0f172a;
+
+    /* Borders & Dividers */
+    --border-color: rgba(255, 255, 255, 0.08);
+    --border-light: rgba(255, 255, 255, 0.04);
+    --border-focus: #6366f1;
+
+    /* Shadows & Elevation */
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
+    --shadow-md: 0 4px 14px -1px rgba(0, 0, 0, 0.5), 0 2px 6px -2px rgba(0, 0, 0, 0.4);
+    --shadow-lg: 0 12px 30px -3px rgba(0, 0, 0, 0.6), 0 4px 12px -4px rgba(0, 0, 0, 0.5);
+    --shadow-glow: 0 0 25px rgba(99, 102, 241, 0.35);
+    --shadow-glow-cyan: 0 0 25px rgba(6, 182, 212, 0.35);
+
+    /* Radius & Spacing */
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
+    --radius-xl: 20px;
+    --radius-full: 9999px;
+
+    /* Transitions */
+    --transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-normal: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-smooth: 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+
+    /* Dimensions */
+    --navbar-height: 64px;
+    --column-width: 320px;
+}
