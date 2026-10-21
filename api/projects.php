@@ -1,6 +1,11 @@
 <?php
 declare(strict_types=1);
 
+/**
+ * Tool Manager - Projects & Team Management API
+ * Project CRUD, Member Roster & Role Promotion, User Profile & Settings, CSRF Protected
+ */
+
 require_once __DIR__ . '/../config/db.php';
 
 $currentUser = requireAuthApi();
@@ -9,7 +14,7 @@ $method = $_SERVER['REQUEST_METHOD'];
 $action = $_GET['action'] ?? '';
 
 // ============================================================================
-// 1. GET Requests: Project Listing, Single Project Board State, Search, Notifs
+// 1. GET Requests: Projects, Roster, Single Project Board State, Search, Notifs
 // ============================================================================
 if ($method === 'GET') {
     // 1.1 Notification List
@@ -19,7 +24,7 @@ if ($method === 'GET') {
             FROM `notifications`
             WHERE `user_id` = :uid
             ORDER BY `created_at` DESC
-            LIMIT 20
+            LIMIT 25
         ");
         $stmt->execute([':uid' => $currentUser['id']]);
         $notifications = $stmt->fetchAll();
@@ -40,16 +45,37 @@ if ($method === 'GET') {
         ]);
     }
 
-    // 1.2 Search users to invite
+    // 1.2 Get Project Members Roster (For Team Management Modal)
+    if ($action === 'get_members') {
+        $projectId = (int)($_GET['project_id'] ?? 0);
+        if (!$projectId || !checkProjectAccess($projectId, $currentUser['id'], $pdo)) {
+            jsonResponse(['success' => false, 'error' => 'Access denied.'], 403);
+        }
+
+        $stmtMem = $pdo->prepare("
+            SELECT u.id, u.username, u.email, u.avatar_color, pm.role, pm.created_at AS joined_at,
+                   (CASE WHEN p.owner_id = u.id THEN 1 ELSE 0 END) AS is_owner
+            FROM `project_members` pm
+            JOIN `users` u ON pm.user_id = u.id
+            JOIN `projects` p ON pm.project_id = p.id
+            WHERE pm.project_id = :pid
+            ORDER BY is_owner DESC, pm.role ASC, u.username ASC
+        ");
+        $stmtMem->execute([':pid' => $projectId]);
+        $members = $stmtMem->fetchAll();
+
+        jsonResponse(['success' => true, 'data' => $members]);
+    }
+
+    // 1.3 Search users to invite (excluding current project members)
     if ($action === 'search_users') {
         $query = trim($_GET['query'] ?? '');
         $projectId = isset($_GET['project_id']) ? (int)$_GET['project_id'] : 0;
 
-        if (strlen($query) < 2) {
+        if (mb_strlen($query) < 2) {
             jsonResponse(['success' => true, 'data' => []]);
         }
 
-        // Exclude members already in the project
         if ($projectId > 0) {
             $stmt = $pdo->prepare("
                 SELECT u.id, u.username, u.email, u.avatar_color
@@ -85,7 +111,7 @@ if ($method === 'GET') {
         jsonResponse(['success' => true, 'data' => $stmt->fetchAll()]);
     }
 
-    // 1.3 Single Project Detailed Board Fetch
+    // 1.4 Single Project Detailed Board Fetch
     if (isset($_GET['id'])) {
         $projectId = (int)$_GET['id'];
 
@@ -93,7 +119,6 @@ if ($method === 'GET') {
             jsonResponse(['success' => false, 'error' => 'You do not have access to this project.'], 403);
         }
 
-        // Fetch Project Info
         $stmt = $pdo->prepare("
             SELECT p.*, u.username AS owner_name, u.avatar_color AS owner_avatar
             FROM `projects` p
@@ -107,7 +132,10 @@ if ($method === 'GET') {
             jsonResponse(['success' => false, 'error' => 'Project not found.'], 404);
         }
 
-        $project['is_owner'] = ((int)$project['owner_id'] === $currentUser['id']);
+        $userRole = getProjectMemberRole($projectId, $currentUser['id'], $pdo);
+        $project['user_role'] = $userRole;
+        $project['is_owner'] = ($userRole === 'owner');
+        $project['is_admin'] = in_array($userRole, ['owner', 'admin'], true);
 
         // Fetch Members
         $stmtMem = $pdo->prepare("
@@ -120,7 +148,7 @@ if ($method === 'GET') {
         $stmtMem->execute([':pid' => $projectId]);
         $members = $stmtMem->fetchAll();
 
-        // Fetch Columns ordered by position
+        // Fetch Columns
         $stmtCol = $pdo->prepare("
             SELECT id, name, position
             FROM `columns`
@@ -130,7 +158,7 @@ if ($method === 'GET') {
         $stmtCol->execute([':pid' => $projectId]);
         $columns = $stmtCol->fetchAll();
 
-        // Fetch all Tasks in project
+        // Fetch Tasks
         $stmtTasks = $pdo->prepare("
             SELECT t.id, t.column_id, t.title, t.description, t.due_date, t.priority, t.position, t.created_at, t.updated_at,
                    (SELECT COUNT(*) FROM `comments` c WHERE c.task_id = t.id) AS comments_count
@@ -142,7 +170,7 @@ if ($method === 'GET') {
         $stmtTasks->execute([':pid' => $projectId]);
         $allTasks = $stmtTasks->fetchAll();
 
-        // Fetch Task Assignments
+        // Fetch Assignments
         $stmtAssign = $pdo->prepare("
             SELECT ta.task_id, u.id AS user_id, u.username, u.avatar_color
             FROM `task_assignments` ta
@@ -163,7 +191,6 @@ if ($method === 'GET') {
             ];
         }
 
-        // Group tasks by column
         $tasksByColumn = [];
         foreach ($columns as $c) {
             $tasksByColumn[$c['id']] = [];
@@ -183,15 +210,15 @@ if ($method === 'GET') {
         jsonResponse([
             'success' => true,
             'data'    => [
-                'project' => $project,
-                'members' => $members,
-                'columns' => $columns,
+                'project'      => $project,
+                'members'      => $members,
+                'columns'      => $columns,
                 'last_updated' => $project['updated_at']
             ]
         ]);
     }
 
-    // 1.4 List all Projects for Current User
+    // 1.5 List all Projects for Current User
     $stmt = $pdo->prepare("
         SELECT p.id, p.name, p.description, p.owner_id, p.created_at, p.updated_at,
                u.username AS owner_name, u.avatar_color AS owner_avatar,
@@ -244,12 +271,10 @@ if ($method === 'POST') {
             jsonResponse(['success' => false, 'error' => 'Project ID and User ID are required.'], 400);
         }
 
-        // Only project owner or admin can add members
         if (!checkProjectAccess($projectId, $currentUser['id'], $pdo, true)) {
-            jsonResponse(['success' => false, 'error' => 'Only project admins can add members.'], 403);
+            jsonResponse(['success' => false, 'error' => 'Only project admins or owners can add members.'], 403);
         }
 
-        // Check if user exists
         $stmtUser = $pdo->prepare("SELECT username FROM `users` WHERE id = :uid");
         $stmtUser->execute([':uid' => $userId]);
         $targetUser = $stmtUser->fetch();
@@ -257,7 +282,6 @@ if ($method === 'POST') {
             jsonResponse(['success' => false, 'error' => 'User does not exist.'], 404);
         }
 
-        // Insert or update member role
         $stmt = $pdo->prepare("
             INSERT INTO `project_members` (`project_id`, `user_id`, `role`, `created_at`)
             VALUES (:pid, :uid, :role, NOW())
@@ -270,7 +294,6 @@ if ($method === 'POST') {
             ':role_up' => $role
         ]);
 
-        // Get project name for notification
         $stmtP = $pdo->prepare("SELECT name FROM `projects` WHERE id = :pid");
         $stmtP->execute([':pid' => $projectId]);
         $projectName = $stmtP->fetchColumn() ?: 'a project';
@@ -298,6 +321,10 @@ if ($method === 'POST') {
         jsonResponse(['success' => false, 'error' => 'Project name is required.'], 400);
     }
 
+    if (mb_strlen($name) > 120) {
+        jsonResponse(['success' => false, 'error' => 'Project name must be 120 characters or fewer.'], 400);
+    }
+
     $pdo->beginTransaction();
     try {
         $stmt = $pdo->prepare("
@@ -321,8 +348,8 @@ if ($method === 'POST') {
             ':uid' => $currentUser['id']
         ]);
 
-        // Initialize default enterprise columns
-        $defaultColumns = ['To Do', 'In Progress', 'Code Review', 'Done'];
+        // Default enterprise columns
+        $defaultColumns = ['Backlog', 'In Progress', 'Review & QA', 'Done'];
         $stmtCol = $pdo->prepare("
             INSERT INTO `columns` (`project_id`, `name`, `position`, `created_at`)
             VALUES (:pid, :cname, :pos, NOW())
@@ -347,16 +374,149 @@ if ($method === 'POST') {
         ], 201);
     } catch (Exception $e) {
         $pdo->rollBack();
-        jsonResponse(['success' => false, 'error' => 'Failed to create project: ' . $e->getMessage()], 500);
+        error_log("Failed to create project: " . $e->getMessage());
+        jsonResponse(['success' => false, 'error' => 'Failed to create project.'], 500);
     }
 }
 
 // ============================================================================
-// 3. PUT / PATCH Requests: Update Project Name / Description
+// 3. PUT / PATCH: Update Project Details, Member Role, or User Profile
 // ============================================================================
 if ($method === 'PUT' || $method === 'PATCH') {
     $input = getJsonInput();
-    $projectId = (int)($input['id'] ?? 0);
+
+    // 3.1 Update User Profile & Settings
+    if ($action === 'update_profile') {
+        $username = trim($input['username'] ?? '');
+        $email = trim($input['email'] ?? '');
+        $avatarColor = trim($input['avatar_color'] ?? '');
+        $currentPassword = $input['current_password'] ?? '';
+        $newPassword = $input['new_password'] ?? '';
+
+        if (empty($username) || empty($email)) {
+            jsonResponse(['success' => false, 'error' => 'Username and email cannot be empty.'], 400);
+        }
+
+        if (mb_strlen($username) < 3 || mb_strlen($username) > 50) {
+            jsonResponse(['success' => false, 'error' => 'Username must be between 3 and 50 characters.'], 400);
+        }
+
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            jsonResponse(['success' => false, 'error' => 'Invalid email address.'], 400);
+        }
+
+        // Check uniqueness if changed
+        $stmtCheck = $pdo->prepare("SELECT id FROM `users` WHERE (username = :u OR email = :e) AND id != :uid LIMIT 1");
+        $stmtCheck->execute([':u' => $username, ':e' => $email, ':uid' => $currentUser['id']]);
+        if ($stmtCheck->fetch()) {
+            jsonResponse(['success' => false, 'error' => 'Username or email already in use.'], 400);
+        }
+
+        // Validate allowed avatar colors
+        $allowedColors = ['#6366f1', '#ec4899', '#10b981', '#f59e0b', '#06b6d4', '#8b5cf6', '#3b82f6'];
+        if (!in_array($avatarColor, $allowedColors, true)) {
+            $avatarColor = $currentUser['avatar_color'];
+        }
+
+        try {
+            if (!empty($newPassword)) {
+                if (mb_strlen($newPassword) < 6) {
+                    jsonResponse(['success' => false, 'error' => 'New password must be at least 6 characters.'], 400);
+                }
+
+                $stmtPass = $pdo->prepare("SELECT password_hash FROM `users` WHERE id = :uid");
+                $stmtPass->execute([':uid' => $currentUser['id']]);
+                $hash = (string)$stmtPass->fetchColumn();
+
+                if (!password_verify($currentPassword, $hash)) {
+                    jsonResponse(['success' => false, 'error' => 'Current password is incorrect.'], 400);
+                }
+
+                $newHash = password_hash($newPassword, PASSWORD_DEFAULT);
+                $stmtUpdate = $pdo->prepare("
+                    UPDATE `users`
+                    SET `username` = :u, `email` = :e, `avatar_color` = :a, `password_hash` = :p
+                    WHERE `id` = :uid
+                ");
+                $stmtUpdate->execute([
+                    ':u'   => $username,
+                    ':e'   => $email,
+                    ':a'   => $avatarColor,
+                    ':p'   => $newHash,
+                    ':uid' => $currentUser['id']
+                ]);
+            } else {
+                $stmtUpdate = $pdo->prepare("
+                    UPDATE `users`
+                    SET `username` = :u, `email` = :e, `avatar_color` = :a
+                    WHERE `id` = :uid
+                ");
+                $stmtUpdate->execute([
+                    ':u'   => $username,
+                    ':e'   => $email,
+                    ':a'   => $avatarColor,
+                    ':uid' => $currentUser['id']
+                ]);
+            }
+
+            // Sync session
+            $_SESSION['username'] = $username;
+            $_SESSION['email'] = $email;
+            $_SESSION['avatar_color'] = $avatarColor;
+
+            jsonResponse([
+                'success' => true,
+                'message' => 'Profile updated successfully.',
+                'data'    => [
+                    'username'     => $username,
+                    'email'        => $email,
+                    'avatar_color' => $avatarColor
+                ]
+            ]);
+        } catch (Exception $e) {
+            error_log("Profile update error: " . $e->getMessage());
+            jsonResponse(['success' => false, 'error' => 'Failed to update profile.'], 500);
+        }
+    }
+
+    // 3.2 Update Project Member Role (Admin / Owner Only)
+    if ($action === 'update_member_role') {
+        $projectId = (int)($input['project_id'] ?? 0);
+        $targetUserId = (int)($input['user_id'] ?? 0);
+        $newRole = ($input['role'] ?? '') === 'admin' ? 'admin' : 'member';
+
+        if (!$projectId || !$targetUserId) {
+            jsonResponse(['success' => false, 'error' => 'Project ID and User ID are required.'], 400);
+        }
+
+        // Must be admin or owner
+        if (!checkProjectAccess($projectId, $currentUser['id'], $pdo, true)) {
+            jsonResponse(['success' => false, 'error' => 'Only project admins or owners can update member roles.'], 403);
+        }
+
+        // Cannot demote the project owner
+        $stmtOwner = $pdo->prepare("SELECT owner_id FROM `projects` WHERE id = :pid");
+        $stmtOwner->execute([':pid' => $projectId]);
+        $ownerId = (int)$stmtOwner->fetchColumn();
+
+        if ($targetUserId === $ownerId) {
+            jsonResponse(['success' => false, 'error' => 'Cannot modify the project owner role.'], 400);
+        }
+
+        $stmt = $pdo->prepare("UPDATE `project_members` SET `role` = :role WHERE `project_id` = :pid AND `user_id` = :uid");
+        $stmt->execute([
+            ':role' => $newRole,
+            ':pid'  => $projectId,
+            ':uid'  => $targetUserId
+        ]);
+
+        touchProject($projectId, $pdo);
+
+        jsonResponse(['success' => true, 'message' => "Member role updated to {$newRole}."]);
+    }
+
+    // 3.3 Update Project Name / Description
+    $projectId = (int)($input['id'] ?? $input['project_id'] ?? 0);
     $name = trim($input['name'] ?? '');
     $description = trim($input['description'] ?? '');
 
@@ -364,27 +524,41 @@ if ($method === 'PUT' || $method === 'PATCH') {
         jsonResponse(['success' => false, 'error' => 'Project ID and name are required.'], 400);
     }
 
-    if (!checkProjectAccess($projectId, $currentUser['id'], $pdo, true)) {
-        jsonResponse(['success' => false, 'error' => 'Only project admins can edit project details.'], 403);
+    if (mb_strlen($name) > 120) {
+        jsonResponse(['success' => false, 'error' => 'Project name must be 120 characters or fewer.'], 400);
     }
 
-    $stmt = $pdo->prepare("
-        UPDATE `projects`
-        SET `name` = :name, `description` = :desc, `updated_at` = NOW()
-        WHERE `id` = :id
-    ");
-    $stmt->execute([
-        ':name' => $name,
-        ':desc' => $description,
-        ':id'   => $projectId
-    ]);
+    if (!checkProjectAccess($projectId, $currentUser['id'], $pdo, true)) {
+        jsonResponse(['success' => false, 'error' => 'Only project admins or owners can edit project details.'], 403);
+    }
 
-    touchProject($projectId, $pdo);
+    try {
+        $stmt = $pdo->prepare("
+            UPDATE `projects`
+            SET `name` = :name, `description` = :desc, `updated_at` = NOW()
+            WHERE `id` = :id
+        ");
+        $stmt->execute([
+            ':name' => $name,
+            ':desc' => $description,
+            ':id'   => $projectId
+        ]);
 
-    jsonResponse([
-        'success' => true,
-        'message' => 'Project updated successfully.'
-    ]);
+        touchProject($projectId, $pdo);
+
+        jsonResponse([
+            'success' => true,
+            'message' => 'Project updated successfully.',
+            'data'    => [
+                'id'          => $projectId,
+                'name'        => $name,
+                'description' => $description
+            ]
+        ]);
+    } catch (Exception $e) {
+        error_log("Failed to update project: " . $e->getMessage());
+        jsonResponse(['success' => false, 'error' => 'Failed to update project.'], 500);
+    }
 }
 
 // ============================================================================
@@ -394,7 +568,7 @@ if ($method === 'DELETE') {
     $input = getJsonInput();
 
     // 4.1 Remove Member from Project
-    if ($action === 'remove_member' || isset($input['action']) && $input['action'] === 'remove_member') {
+    if ($action === 'remove_member' || (isset($input['action']) && $input['action'] === 'remove_member')) {
         $projectId = (int)($input['project_id'] ?? $_GET['project_id'] ?? 0);
         $userId = (int)($input['user_id'] ?? $_GET['user_id'] ?? 0);
 
@@ -402,7 +576,6 @@ if ($method === 'DELETE') {
             jsonResponse(['success' => false, 'error' => 'Project ID and User ID are required.'], 400);
         }
 
-        // Cannot remove the project owner
         $stmtOwner = $pdo->prepare("SELECT owner_id FROM `projects` WHERE id = :pid");
         $stmtOwner->execute([':pid' => $projectId]);
         $ownerId = (int)$stmtOwner->fetchColumn();
@@ -411,7 +584,6 @@ if ($method === 'DELETE') {
             jsonResponse(['success' => false, 'error' => 'The project owner cannot be removed.'], 400);
         }
 
-        // Must be admin or removing self
         $isSelf = ($userId === $currentUser['id']);
         if (!$isSelf && !checkProjectAccess($projectId, $currentUser['id'], $pdo, true)) {
             jsonResponse(['success' => false, 'error' => 'Permission denied.'], 403);
@@ -425,7 +597,7 @@ if ($method === 'DELETE') {
         jsonResponse(['success' => true, 'message' => 'Member removed successfully.']);
     }
 
-    // 4.2 Delete Entire Project (Owner only)
+    // 4.2 Delete Entire Project (Owner Only)
     $projectId = (int)($input['id'] ?? $_GET['id'] ?? 0);
 
     if (!$projectId) {
@@ -444,10 +616,15 @@ if ($method === 'DELETE') {
         jsonResponse(['success' => false, 'error' => 'Only the project owner can delete this project.'], 403);
     }
 
-    $stmtDel = $pdo->prepare("DELETE FROM `projects` WHERE id = :id");
-    $stmtDel->execute([':id' => $projectId]);
+    try {
+        $stmtDel = $pdo->prepare("DELETE FROM `projects` WHERE id = :id");
+        $stmtDel->execute([':id' => $projectId]);
 
-    jsonResponse(['success' => true, 'message' => 'Project deleted successfully.']);
+        jsonResponse(['success' => true, 'message' => 'Project deleted successfully.']);
+    } catch (Exception $e) {
+        error_log("Failed to delete project: " . $e->getMessage());
+        jsonResponse(['success' => false, 'error' => 'Failed to delete project.'], 500);
+    }
 }
 
 jsonResponse(['success' => false, 'error' => 'Method not allowed.'], 405);

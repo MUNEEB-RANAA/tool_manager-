@@ -1,6 +1,11 @@
 <?php
 declare(strict_types=1);
 
+/**
+ * Tool Manager - Tasks API Endpoint
+ * High-Reliability Positional DND Engine, Batch Reordering, CSRF & RBAC Protected
+ */
+
 require_once __DIR__ . '/../config/db.php';
 
 $currentUser = requireAuthApi();
@@ -78,12 +83,25 @@ if ($method === 'POST') {
     $columnId = (int)($input['column_id'] ?? 0);
     $title = trim($input['title'] ?? '');
     $description = trim($input['description'] ?? '');
-    $dueDate = !empty($input['due_date']) ? $input['due_date'] : null;
-    $priority = in_array($input['priority'] ?? '', ['low', 'medium', 'high', 'urgent']) ? $input['priority'] : 'medium';
+    $rawDue = trim($input['due_date'] ?? '');
+    $priority = in_array($input['priority'] ?? '', ['low', 'medium', 'high', 'urgent'], true) ? $input['priority'] : 'medium';
     $assigneeIds = is_array($input['assignee_ids'] ?? null) ? $input['assignee_ids'] : [];
 
     if (!$columnId || empty($title)) {
         jsonResponse(['success' => false, 'error' => 'Column ID and task title are required.'], 400);
+    }
+
+    if (mb_strlen($title) > 255) {
+        jsonResponse(['success' => false, 'error' => 'Task title must be 255 characters or fewer.'], 400);
+    }
+
+    // Validate due date format
+    $dueDate = null;
+    if (!empty($rawDue)) {
+        $d = DateTime::createFromFormat('Y-m-d', $rawDue);
+        if ($d && $d->format('Y-m-d') === $rawDue) {
+            $dueDate = $rawDue;
+        }
     }
 
     $projectId = getProjectIdFromColumn($columnId, $pdo);
@@ -160,7 +178,8 @@ if ($method === 'POST') {
         ], 201);
     } catch (Exception $e) {
         $pdo->rollBack();
-        jsonResponse(['success' => false, 'error' => 'Failed to create task: ' . $e->getMessage()], 500);
+        error_log("Failed to create task: " . $e->getMessage());
+        jsonResponse(['success' => false, 'error' => 'Failed to create task.'], 500);
     }
 }
 
@@ -169,8 +188,49 @@ if ($method === 'POST') {
 // ============================================================================
 if ($method === 'PUT' || $method === 'PATCH') {
     $input = getJsonInput();
-    $taskId = (int)($input['task_id'] ?? $input['id'] ?? 0);
 
+    // 3.1 BATCH REORDER ENTIRE COLUMN TASKS (Most robust for Kanban drag & drop)
+    if (($input['action'] ?? '') === 'reorder_column') {
+        $columnId = (int)($input['column_id'] ?? 0);
+        $taskIds = is_array($input['task_ids'] ?? null) ? $input['task_ids'] : [];
+
+        if (!$columnId) {
+            jsonResponse(['success' => false, 'error' => 'Column ID is required.'], 400);
+        }
+
+        $projectId = getProjectIdFromColumn($columnId, $pdo);
+        if (!$projectId || !checkProjectAccess($projectId, $currentUser['id'], $pdo)) {
+            jsonResponse(['success' => false, 'error' => 'Access denied.'], 403);
+        }
+
+        $pdo->beginTransaction();
+        try {
+            $stmt = $pdo->prepare("
+                UPDATE `tasks`
+                SET `position` = :pos, `column_id` = :cid, `updated_at` = NOW()
+                WHERE `id` = :tid AND `column_id` IN (SELECT id FROM `columns` WHERE project_id = :pid)
+            ");
+            foreach ($taskIds as $pos => $tid) {
+                $stmt->execute([
+                    ':pos' => (int)$pos,
+                    ':cid' => $columnId,
+                    ':tid' => (int)$tid,
+                    ':pid' => $projectId
+                ]);
+            }
+            $pdo->commit();
+            touchProject($projectId, $pdo);
+
+            jsonResponse(['success' => true, 'message' => 'Tasks reordered successfully.']);
+        } catch (Exception $e) {
+            $pdo->rollBack();
+            error_log("Failed to reorder column tasks: " . $e->getMessage());
+            jsonResponse(['success' => false, 'error' => 'Failed to reorder tasks.'], 500);
+        }
+    }
+
+    // 3.2 SINGLE TASK UPDATE OR MOVE
+    $taskId = (int)($input['task_id'] ?? $input['id'] ?? 0);
     if (!$taskId) {
         jsonResponse(['success' => false, 'error' => 'Task ID is required.'], 400);
     }
@@ -192,7 +252,7 @@ if ($method === 'PUT' || $method === 'PATCH') {
             $sourceColId = (int)$taskMeta['column_id'];
             $targetColId = (int)($input['new_column_id'] ?? $input['column_id'] ?? $sourceColId);
             $oldPos = (int)$taskMeta['position'];
-            $newPos = (int)($input['new_position'] ?? $input['position'] ?? 0);
+            $newPos = max(0, (int)($input['new_position'] ?? $input['position'] ?? 0));
 
             // Verify target column belongs to the same project
             $targetProjId = getProjectIdFromColumn($targetColId, $pdo);
@@ -201,10 +261,9 @@ if ($method === 'PUT' || $method === 'PATCH') {
             }
 
             if ($sourceColId === $targetColId) {
-                // Moving within the SAME column
+                // Moving within same column
                 if ($oldPos !== $newPos) {
                     if ($oldPos < $newPos) {
-                        // Shift intermediate items DOWN (decrement position)
                         $stmtShift = $pdo->prepare("
                             UPDATE `tasks`
                             SET `position` = `position` - 1
@@ -212,7 +271,6 @@ if ($method === 'PUT' || $method === 'PATCH') {
                         ");
                         $stmtShift->execute([':cid' => $sourceColId, ':oldPos' => $oldPos, ':newPos' => $newPos]);
                     } else {
-                        // Shift intermediate items UP (increment position)
                         $stmtShift = $pdo->prepare("
                             UPDATE `tasks`
                             SET `position` = `position` + 1
@@ -221,13 +279,11 @@ if ($method === 'PUT' || $method === 'PATCH') {
                         $stmtShift->execute([':cid' => $sourceColId, ':newPos' => $newPos, ':oldPos' => $oldPos]);
                     }
 
-                    // Set target task to new position
                     $stmtMove = $pdo->prepare("UPDATE `tasks` SET `position` = :newPos, `updated_at` = NOW() WHERE `id` = :tid");
                     $stmtMove->execute([':newPos' => $newPos, ':tid' => $taskId]);
                 }
             } else {
-                // Moving to a DIFFERENT column
-                // 1. Shift tasks in old column above oldPos down
+                // Moving to different column
                 $stmtOld = $pdo->prepare("
                     UPDATE `tasks`
                     SET `position` = `position` - 1
@@ -235,7 +291,6 @@ if ($method === 'PUT' || $method === 'PATCH') {
                 ");
                 $stmtOld->execute([':oldCid' => $sourceColId, ':oldPos' => $oldPos]);
 
-                // 2. Shift tasks in new column at or after newPos up
                 $stmtNew = $pdo->prepare("
                     UPDATE `tasks`
                     SET `position` = `position` + 1
@@ -243,7 +298,6 @@ if ($method === 'PUT' || $method === 'PATCH') {
                 ");
                 $stmtNew->execute([':newCid' => $targetColId, ':newPos' => $newPos]);
 
-                // 3. Move target task to new column & position
                 $stmtMove = $pdo->prepare("
                     UPDATE `tasks`
                     SET `column_id` = :newCid, `position` = :newPos, `updated_at` = NOW()
@@ -263,17 +317,25 @@ if ($method === 'PUT' || $method === 'PATCH') {
 
         if (isset($input['title']) && trim($input['title']) !== '') {
             $fieldsToUpdate[] = "`title` = :title";
-            $params[':title'] = trim($input['title']);
+            $params[':title'] = mb_substr(trim($input['title']), 0, 255);
         }
         if (isset($input['description'])) {
             $fieldsToUpdate[] = "`description` = :desc";
             $params[':desc'] = trim($input['description']);
         }
         if (array_key_exists('due_date', $input)) {
+            $rawDue = trim((string)$input['due_date']);
+            $validDue = null;
+            if (!empty($rawDue)) {
+                $d = DateTime::createFromFormat('Y-m-d', $rawDue);
+                if ($d && $d->format('Y-m-d') === $rawDue) {
+                    $validDue = $rawDue;
+                }
+            }
             $fieldsToUpdate[] = "`due_date` = :due";
-            $params[':due'] = !empty($input['due_date']) ? $input['due_date'] : null;
+            $params[':due'] = $validDue;
         }
-        if (isset($input['priority']) && in_array($input['priority'], ['low', 'medium', 'high', 'urgent'])) {
+        if (isset($input['priority']) && in_array($input['priority'], ['low', 'medium', 'high', 'urgent'], true)) {
             $fieldsToUpdate[] = "`priority` = :priority";
             $params[':priority'] = $input['priority'];
         }
@@ -284,13 +346,11 @@ if ($method === 'PUT' || $method === 'PATCH') {
             $stmtUp->execute($params);
         }
 
-        // CASE C: Update Assignees (if provided)
+        // CASE C: Update Assignees
         if (isset($input['assignee_ids']) && is_array($input['assignee_ids'])) {
-            // Delete existing
             $stmtDelAss = $pdo->prepare("DELETE FROM `task_assignments` WHERE `task_id` = :tid");
             $stmtDelAss->execute([':tid' => $taskId]);
 
-            // Re-insert
             if (!empty($input['assignee_ids'])) {
                 $stmtInsAss = $pdo->prepare("INSERT IGNORE INTO `task_assignments` (`task_id`, `user_id`) VALUES (:tid, :uid)");
                 foreach ($input['assignee_ids'] as $uid) {
@@ -311,7 +371,8 @@ if ($method === 'PUT' || $method === 'PATCH') {
         ]);
     } catch (Exception $e) {
         $pdo->rollBack();
-        jsonResponse(['success' => false, 'error' => 'Failed to update task: ' . $e->getMessage()], 500);
+        error_log("Failed to update task: " . $e->getMessage());
+        jsonResponse(['success' => false, 'error' => 'Failed to update task.'], 500);
     }
 }
 
@@ -341,11 +402,9 @@ if ($method === 'DELETE') {
 
     $pdo->beginTransaction();
     try {
-        // Delete task
         $stmtDel = $pdo->prepare("DELETE FROM `tasks` WHERE `id` = :tid");
         $stmtDel->execute([':tid' => $taskId]);
 
-        // Shift remaining tasks in column down
         $stmtShift = $pdo->prepare("
             UPDATE `tasks`
             SET `position` = `position` - 1
@@ -359,7 +418,8 @@ if ($method === 'DELETE') {
         jsonResponse(['success' => true, 'message' => 'Task deleted successfully.']);
     } catch (Exception $e) {
         $pdo->rollBack();
-        jsonResponse(['success' => false, 'error' => 'Failed to delete task: ' . $e->getMessage()], 500);
+        error_log("Failed to delete task: " . $e->getMessage());
+        jsonResponse(['success' => false, 'error' => 'Failed to delete task.'], 500);
     }
 }
 

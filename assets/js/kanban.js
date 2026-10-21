@@ -1,6 +1,6 @@
 /**
  * Tool Manager - Advanced Flow Kanban Board Engine
- * Native HTML5 Drag and Drop API, Optimistic UI Updates, Task Modals, and Collaboration
+ * Native HTML5 Drag and Drop API, Optimistic UI Updates, Task Modals, Multi-Filter, and Collaboration
  */
 
 let currentProjectId = null;
@@ -21,6 +21,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initNewTaskModal();
     initNewColumnModal();
     initFilterBar();
+    initProjectBoardHeaderButtons();
 });
 
 /**
@@ -62,6 +63,7 @@ function initKanbanEventListeners() {
         document.querySelectorAll('.kanban-column').forEach(col => {
             col.classList.remove('drag-over-column');
         });
+        updateEmptyStates();
         draggedTaskCard = null;
     });
 
@@ -78,6 +80,12 @@ function initKanbanEventListeners() {
         const container = column.querySelector('.column-tasks-container');
         if (!container) return;
 
+        // Hide empty state if present while hovering
+        const emptyState = container.querySelector('.column-empty-state');
+        if (emptyState) {
+            emptyState.style.display = 'none';
+        }
+
         const afterElement = getDragAfterElement(container, e.clientY);
         if (afterElement == null) {
             container.appendChild(dragPlaceholder);
@@ -90,6 +98,14 @@ function initKanbanEventListeners() {
         const column = e.target.closest('.kanban-column');
         if (column && !column.contains(e.relatedTarget)) {
             column.classList.remove('drag-over-column');
+            const container = column.querySelector('.column-tasks-container');
+            if (container) {
+                const emptyState = container.querySelector('.column-empty-state');
+                const hasCards = container.querySelectorAll('.task-card:not(.dragging)').length > 0;
+                if (emptyState && !hasCards) {
+                    emptyState.style.display = '';
+                }
+            }
         }
     });
 
@@ -123,7 +139,8 @@ function initKanbanEventListeners() {
         // Update dataset on card
         draggedTaskCard.dataset.columnId = targetColId;
 
-        // Update Column Counters
+        // Sync empty states and column counters across board
+        updateEmptyStates();
         updateColumnTaskCounts();
 
         // Persist change via PATCH API call
@@ -132,7 +149,7 @@ function initKanbanEventListeners() {
         } catch (err) {
             console.error('Failed to persist task drag & drop:', err);
             showToast('Failed to save task move. Reverting...', 'danger');
-            // If failed, re-fetch board state from server
+            // Re-fetch board state from server on conflict
             refreshBoardFromServer();
         }
     });
@@ -173,6 +190,34 @@ function getDragAfterElement(container, y) {
 }
 
 /**
+ * Ensure empty state is properly displayed for columns without tasks
+ */
+function updateEmptyStates() {
+    document.querySelectorAll('.kanban-column').forEach(col => {
+        const container = col.querySelector('.column-tasks-container');
+        if (!container) return;
+        const taskCards = container.querySelectorAll('.task-card');
+        let emptyState = container.querySelector('.column-empty-state');
+
+        if (taskCards.length === 0) {
+            if (!emptyState) {
+                const div = document.createElement('div');
+                div.className = 'column-empty-state';
+                div.innerHTML = `
+                    <div style="font-size:1.5rem; opacity:0.6; margin-bottom:0.25rem;">📋</div>
+                    <div style="font-size:0.8rem; color:var(--text-muted);">No tasks in this stage</div>
+                `;
+                container.appendChild(div);
+            } else {
+                emptyState.style.display = '';
+            }
+        } else if (emptyState) {
+            emptyState.remove();
+        }
+    });
+}
+
+/**
  * Recount tasks per column in the UI
  */
 function updateColumnTaskCounts() {
@@ -182,6 +227,37 @@ function updateColumnTaskCounts() {
         if (counter) counter.textContent = count;
     });
 }
+
+/**
+ * Move Column Position Left (-1) or Right (+1) and persist via API
+ */
+window.moveColumnOrder = async function (columnId, direction) {
+    if (!currentProjectData || !currentProjectData.columns) return;
+    const cols = [...currentProjectData.columns];
+    const idx = cols.findIndex(c => parseInt(c.id, 10) === parseInt(columnId, 10));
+    if (idx === -1) return;
+
+    const targetIdx = idx + direction;
+    if (targetIdx < 0 || targetIdx >= cols.length) return;
+
+    // Swap columns in array
+    const temp = cols[idx];
+    cols[idx] = cols[targetIdx];
+    cols[targetIdx] = temp;
+
+    // Optimistically update and render
+    currentProjectData.columns = cols;
+    renderBoard(currentProjectData);
+
+    try {
+        const colIds = cols.map(c => c.id);
+        await API.columns.reorder(currentProjectId, colIds);
+        showToast('Column order updated', 'success');
+    } catch (err) {
+        showToast(err.message || 'Failed to reorder columns', 'danger');
+        refreshBoardFromServer();
+    }
+};
 
 /**
  * Render complete Board state from server snapshot (used by Initial Load and SSE events)
@@ -198,16 +274,31 @@ function renderBoard(boardData) {
         return; // Skip re-rendering during an active drag operation
     }
 
+    const totalCols = boardData.columns.length;
+
     // Build columns HTML
     let html = '';
-    boardData.columns.forEach(col => {
+    boardData.columns.forEach((col, idx) => {
+        const taskCount = col.tasks ? col.tasks.length : 0;
+        const isFirst = (idx === 0);
+        const isLast = (idx === totalCols - 1);
+
         html += `
             <div class="kanban-column" id="column-${col.id}" data-column-id="${col.id}">
                 <div class="column-header">
-                    <div class="column-title-group" onclick="editColumnTitle(${col.id}, '${escapeHtml(col.name)}')">
-                        <span>${escapeHtml(col.name)}</span>
-                        <span class="column-counter">${col.tasks ? col.tasks.length : 0}</span>
+                    <div style="display:flex; align-items:center; gap:0.35rem; min-width:0; flex:1;">
+                        <!-- Column Reorder Arrows -->
+                        <div style="display:inline-flex; align-items:center; gap:0.1rem; flex-shrink:0;">
+                            <button type="button" class="col-move-btn" title="Move column left" onclick="moveColumnOrder(${col.id}, -1)" ${isFirst ? 'disabled style="opacity:0.25; cursor:not-allowed;"' : ''}>◀</button>
+                            <button type="button" class="col-move-btn" title="Move column right" onclick="moveColumnOrder(${col.id}, 1)" ${isLast ? 'disabled style="opacity:0.25; cursor:not-allowed;"' : ''}>▶</button>
+                        </div>
+
+                        <div class="column-title-group" onclick="editColumnTitle(${col.id}, '${escapeHtml(col.name)}')" title="Click to rename stage">
+                            <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(col.name)}</span>
+                            <span class="column-counter">${taskCount}</span>
+                        </div>
                     </div>
+
                     <div class="column-actions">
                         <button type="button" class="btn btn-ghost btn-sm btn-icon" title="Add Task" onclick="openNewTaskModal(${col.id}, '${escapeHtml(col.name)}')">
                             <span style="font-size:1.1rem; line-height:1;">+</span>
@@ -238,6 +329,7 @@ function renderBoard(boardData) {
     `;
 
     boardContainer.innerHTML = html;
+    updateEmptyStates();
 }
 
 /**
@@ -250,20 +342,31 @@ function renderTaskCards(tasks) {
         const priority = task.priority || 'medium';
         const assignees = task.assignees || [];
         const commentsCount = task.comments_count || 0;
+        const assigneeIds = assignees.map(a => a.id).join(',');
 
         // Due date formatting & badge
+        let dueStatus = 'none';
         let dueDateHtml = '';
         if (task.due_date) {
             const due = new Date(task.due_date);
             const today = new Date();
             today.setHours(0, 0, 0, 0);
-            const isOverdue = due < today;
+
+            const dueDay = new Date(due);
+            dueDay.setHours(0, 0, 0, 0);
+
             const dueFormatted = due.toLocaleDateString([], { month: 'short', day: 'numeric' });
-            dueDateHtml = `
-                <span class="badge ${isOverdue ? 'badge-overdue' : 'badge-due'}">
-                    📅 ${dueFormatted}
-                </span>
-            `;
+
+            if (dueDay < today) {
+                dueStatus = 'overdue';
+                dueDateHtml = `<span class="badge badge-overdue">⚠️ ${dueFormatted}</span>`;
+            } else if (dueDay.getTime() === today.getTime()) {
+                dueStatus = 'today';
+                dueDateHtml = `<span class="badge badge-today">📅 Due Today</span>`;
+            } else {
+                dueStatus = 'upcoming';
+                dueDateHtml = `<span class="badge badge-due">📅 ${dueFormatted}</span>`;
+            }
         }
 
         // Assignees Stack
@@ -284,7 +387,7 @@ function renderTaskCards(tasks) {
         }
 
         return `
-            <div class="task-card" id="task-card-${task.id}" data-task-id="${task.id}" data-column-id="${task.column_id}" draggable="true">
+            <div class="task-card" id="task-card-${task.id}" data-task-id="${task.id}" data-column-id="${task.column_id}" data-priority="${priority}" data-assignee-ids="${assigneeIds}" data-due-status="${dueStatus}" draggable="true">
                 <div class="card-meta-top">
                     <span class="badge badge-priority-${priority}">${priority}</span>
                     ${dueDateHtml}
@@ -342,6 +445,11 @@ function initTaskDetailModal() {
     if (closeBtn) closeBtn.addEventListener('click', closeModal);
     modal.addEventListener('click', (e) => {
         if (e.target === modal) closeModal();
+    });
+
+    // Close on Escape key
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && modal.classList.contains('active')) closeModal();
     });
 
     // Post Comment Form Handler
@@ -419,21 +527,29 @@ function initTaskDetailModal() {
         });
     }
 
-    // Delete Task
+    // Delete Task with Accessible Dialog
     if (deleteTaskBtn) {
         deleteTaskBtn.addEventListener('click', async () => {
             if (!currentlyOpenTaskId) return;
-            if (confirm('Are you sure you want to delete this task?')) {
-                try {
-                    await API.tasks.delete(currentlyOpenTaskId);
-                    showToast('Task deleted', 'info');
-                    closeModal();
-                    const card = document.getElementById(`task-card-${currentlyOpenTaskId}`);
-                    if (card) card.remove();
-                    updateColumnTaskCounts();
-                } catch (err) {
-                    showToast(err.message || 'Failed to delete task', 'danger');
-                }
+
+            const confirmed = await showConfirmDialog(
+                'Delete Task',
+                'Are you sure you want to permanently delete this task and all of its comments?',
+                'Delete Task',
+                true
+            );
+            if (!confirmed) return;
+
+            try {
+                await API.tasks.delete(currentlyOpenTaskId);
+                showToast('Task deleted', 'info');
+                const card = document.getElementById(`task-card-${currentlyOpenTaskId}`);
+                if (card) card.remove();
+                closeModal();
+                updateEmptyStates();
+                updateColumnTaskCounts();
+            } catch (err) {
+                showToast(err.message || 'Failed to delete task', 'danger');
             }
         });
     }
@@ -544,12 +660,10 @@ function appendCommentToModal(comment) {
     const container = document.getElementById('task-comments-feed');
     if (!container) return;
 
-    // Remove empty notice if present
     if (container.textContent.includes('No comments yet')) {
         container.innerHTML = '';
     }
 
-    // Check if comment already rendered
     if (document.getElementById(`comment-${comment.id}`)) return;
 
     const div = document.createElement('div');
@@ -578,6 +692,10 @@ function initNewTaskModal() {
     if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
     modal.addEventListener('click', (e) => {
         if (e.target === modal) closeModal();
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && modal.classList.contains('active')) closeModal();
     });
 
     window.openNewTaskModal = function (columnId, columnName) {
@@ -647,6 +765,7 @@ function initNewTaskModal() {
                         const tempDiv = document.createElement('div');
                         tempDiv.innerHTML = renderTaskCards([res.data]);
                         colContainer.appendChild(tempDiv.firstElementChild);
+                        updateEmptyStates();
                         updateColumnTaskCounts();
                     }
                 }
@@ -680,6 +799,10 @@ function initNewColumnModal() {
     if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
     modal.addEventListener('click', (e) => {
         if (e.target === modal) closeModal();
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && modal.classList.contains('active')) closeModal();
     });
 
     window.openNewColumnModal = function () {
@@ -735,40 +858,83 @@ window.editColumnTitle = async function (columnId, oldName) {
 };
 
 window.deleteColumn = async function (columnId, columnName) {
-    if (confirm(`Are you sure you want to delete column "${columnName}" and all of its tasks?`)) {
-        try {
-            await API.columns.delete(columnId);
-            showToast('Column deleted', 'info');
-            const col = document.getElementById(`column-${columnId}`);
-            if (col) col.remove();
-        } catch (err) {
-            showToast(err.message || 'Failed to delete column', 'danger');
+    const confirmed = await showConfirmDialog(
+        'Delete Column',
+        `Are you sure you want to delete column "${columnName}" and all of its tasks? This action cannot be undone.`,
+        'Delete Column',
+        true
+    );
+    if (!confirmed) return;
+
+    try {
+        await API.columns.delete(columnId);
+        showToast('Column deleted', 'info');
+        const col = document.getElementById(`column-${columnId}`);
+        if (col) col.remove();
+
+        // Update in-memory project data
+        if (currentProjectData && currentProjectData.columns) {
+            currentProjectData.columns = currentProjectData.columns.filter(c => parseInt(c.id, 10) !== parseInt(columnId, 10));
+            renderBoard(currentProjectData);
         }
+    } catch (err) {
+        showToast(err.message || 'Failed to delete column', 'danger');
     }
 };
 
 // ============================================================================
-// Board Search & Filter Bar
+// Multi-Dimensional Board Search & Filter Bar
 // ============================================================================
 function initFilterBar() {
     const searchInput = document.getElementById('board-search-input');
     const priorityFilter = document.getElementById('board-priority-filter');
+    const assigneeFilter = document.getElementById('board-assignee-filter');
+    const dueFilter = document.getElementById('board-due-filter');
+    const clearBtn = document.getElementById('btn-clear-filters');
+    const boardContainer = document.getElementById('kanban-board-container');
 
-    if (!searchInput && !priorityFilter) return;
+    if (!searchInput && !priorityFilter && !assigneeFilter && !dueFilter) return;
 
     const filterTasks = () => {
         const query = (searchInput?.value || '').toLowerCase().trim();
         const selectedPriority = priorityFilter?.value || 'all';
+        const selectedAssignee = assigneeFilter?.value || 'all';
+        const selectedDue = dueFilter?.value || 'all';
+        const currentUserId = boardContainer ? boardContainer.dataset.currentUserId : null;
+
+        const hasActiveFilters = (query !== '' || selectedPriority !== 'all' || selectedAssignee !== 'all' || selectedDue !== 'all');
+        if (clearBtn) {
+            clearBtn.style.display = hasActiveFilters ? 'inline-flex' : 'none';
+        }
 
         document.querySelectorAll('.task-card').forEach(card => {
             const title = card.querySelector('.task-title')?.textContent.toLowerCase() || '';
             const desc = card.querySelector('.task-desc-preview')?.textContent.toLowerCase() || '';
-            const priorityBadge = card.querySelector('.badge[class*="badge-priority-"]')?.textContent.toLowerCase() || '';
+            const cardPriority = (card.dataset.priority || 'medium').toLowerCase();
+            const assigneeIds = (card.dataset.assigneeIds || '').split(',').map(s => s.trim()).filter(Boolean);
+            const cardDueStatus = card.dataset.dueStatus || 'none';
 
-            const matchesText = title.includes(query) || desc.includes(query);
-            const matchesPriority = (selectedPriority === 'all') || (priorityBadge === selectedPriority);
+            // Text match
+            const matchesText = !query || title.includes(query) || desc.includes(query);
 
-            if (matchesText && matchesPriority) {
+            // Priority match
+            const matchesPriority = (selectedPriority === 'all') || (cardPriority === selectedPriority.toLowerCase());
+
+            // Assignee match
+            let matchesAssignee = true;
+            if (selectedAssignee === 'me') {
+                matchesAssignee = currentUserId ? assigneeIds.includes(String(currentUserId)) : false;
+            } else if (selectedAssignee !== 'all') {
+                matchesAssignee = assigneeIds.includes(String(selectedAssignee));
+            }
+
+            // Due status match
+            let matchesDue = true;
+            if (selectedDue !== 'all') {
+                matchesDue = (cardDueStatus === selectedDue);
+            }
+
+            if (matchesText && matchesPriority && matchesAssignee && matchesDue) {
                 card.style.display = 'flex';
             } else {
                 card.style.display = 'none';
@@ -780,9 +946,60 @@ function initFilterBar() {
 
     if (searchInput) searchInput.addEventListener('input', filterTasks);
     if (priorityFilter) priorityFilter.addEventListener('change', filterTasks);
+    if (assigneeFilter) assigneeFilter.addEventListener('change', filterTasks);
+    if (dueFilter) dueFilter.addEventListener('change', filterTasks);
+
+    if (clearBtn) {
+        clearBtn.addEventListener('click', () => {
+            if (searchInput) searchInput.value = '';
+            if (priorityFilter) priorityFilter.value = 'all';
+            if (assigneeFilter) assigneeFilter.value = 'all';
+            if (dueFilter) dueFilter.value = 'all';
+            filterTasks();
+        });
+    }
 }
 
-// Global hook for SSE Real-Time Manager
+/**
+ * Connect Project Header Navigation Controls (Edit Project, Team Roster, Invite)
+ */
+function initProjectBoardHeaderButtons() {
+    // 1. Edit Project Details
+    const editHeaderBtn = document.getElementById('btn-edit-project-header');
+    if (editHeaderBtn) {
+        editHeaderBtn.addEventListener('click', () => {
+            if (window.openEditProjectModal && currentProjectData && currentProjectData.project) {
+                window.openEditProjectModal(
+                    currentProjectId,
+                    currentProjectData.project.name,
+                    currentProjectData.project.description || ''
+                );
+            }
+        });
+    }
+
+    // 2. Team Roster & Role Manager
+    const rosterBtn = document.getElementById('btn-manage-team-roster');
+    if (rosterBtn) {
+        rosterBtn.addEventListener('click', () => {
+            if (window.openTeamRosterModal && currentProjectData && currentProjectData.project) {
+                window.openTeamRosterModal(currentProjectId, currentProjectData.project.name);
+            }
+        });
+    }
+
+    // 3. Invite Member
+    const inviteBtn = document.getElementById('btn-open-invite-board');
+    if (inviteBtn) {
+        inviteBtn.addEventListener('click', () => {
+            if (window.openInviteModal && currentProjectData && currentProjectData.project) {
+                window.openInviteModal(currentProjectId, currentProjectData.project.name);
+            }
+        });
+    }
+}
+
+// Global hooks for SSE Real-Time Manager
 window.onRealTimeBoardUpdate = function (boardData) {
     renderBoard(boardData);
 };

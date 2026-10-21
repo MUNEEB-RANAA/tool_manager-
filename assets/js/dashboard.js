@@ -1,11 +1,16 @@
 /**
- * Tool Manager - Dashboard Logic - Project Creation, Search, Member Invitations, and Stats
+ * Tool Manager - Dashboard Logic
+ * Project Creation, Search, In-Place Editing, Member Roster, Profile Settings, and Live Badges
  */
 
 document.addEventListener('DOMContentLoaded', () => {
     initProjectSearch();
+    initProjectCardInteractions();
     initNewProjectModal();
+    initEditProjectModal();
     initInviteMemberModal();
+    initTeamRosterModal();
+    initUserProfileModal();
     initNotificationDropdown();
 });
 
@@ -34,6 +39,112 @@ function initProjectSearch() {
 }
 
 /**
+ * Handle clicks and keyboard events on project cards safely
+ */
+function initProjectCardInteractions() {
+    const grid = document.getElementById('projects-grid');
+    if (!grid) return;
+
+    // Click handler with delegation
+    grid.addEventListener('click', async (e) => {
+        // 1. Delete Project Button
+        const delBtn = e.target.closest('.btn-delete-project');
+        if (delBtn) {
+            e.stopPropagation();
+            const pid = parseInt(delBtn.dataset.projectId, 10);
+            const name = delBtn.dataset.projectName || 'this project';
+            handleDeleteProject(pid, name);
+            return;
+        }
+
+        // 2. Edit Project Button
+        const editBtn = e.target.closest('.btn-edit-project');
+        if (editBtn) {
+            e.stopPropagation();
+            const pid = parseInt(editBtn.dataset.projectId, 10);
+            const name = editBtn.dataset.projectName || '';
+            const desc = editBtn.dataset.projectDesc || '';
+            if (window.openEditProjectModal) {
+                window.openEditProjectModal(pid, name, desc);
+            }
+            return;
+        }
+
+        // 3. Team Roster Button
+        const rosterBtn = e.target.closest('.btn-manage-roster');
+        if (rosterBtn) {
+            e.stopPropagation();
+            const pid = parseInt(rosterBtn.dataset.projectId, 10);
+            const name = rosterBtn.dataset.projectName || '';
+            if (window.openTeamRosterModal) {
+                window.openTeamRosterModal(pid, name);
+            }
+            return;
+        }
+
+        // 4. Invite Button Trigger
+        const inviteBtn = e.target.closest('.btn-invite-trigger');
+        if (inviteBtn) {
+            e.stopPropagation();
+            const pid = parseInt(inviteBtn.dataset.projectId, 10);
+            const name = inviteBtn.dataset.projectName || '';
+            if (window.openInviteModal) {
+                window.openInviteModal(pid, name);
+            }
+            return;
+        }
+
+        // 5. Card click -> Navigate to project board
+        const card = e.target.closest('.project-card');
+        if (card && card.dataset.projectId) {
+            window.location.href = `project.php?id=${encodeURIComponent(card.dataset.projectId)}`;
+        }
+    });
+
+    // Keyboard navigation (Enter / Space)
+    grid.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+            const card = e.target.closest('.project-card');
+            if (card && card.dataset.projectId && !e.target.closest('button')) {
+                e.preventDefault();
+                window.location.href = `project.php?id=${encodeURIComponent(card.dataset.projectId)}`;
+            }
+        }
+    });
+}
+
+/**
+ * Handle Project Deletion with Custom Confirmation Modal
+ */
+async function handleDeleteProject(projectId, projectName) {
+    const confirmed = await showConfirmDialog(
+        'Delete Project',
+        `Are you sure you want to permanently delete "${projectName}"? All columns, tasks, assignees, and comments will be completely erased. This action cannot be undone.`,
+        'Delete Project',
+        true
+    );
+
+    if (confirmed) {
+        try {
+            const res = await API.projects.delete(projectId);
+            if (res.success) {
+                showToast('Project deleted successfully.', 'success');
+                const card = document.getElementById(`project-card-${projectId}`);
+                if (card) {
+                    card.style.opacity = '0';
+                    card.style.transform = 'scale(0.95)';
+                    setTimeout(() => card.remove(), 300);
+                }
+            } else {
+                showToast(res.error || 'Failed to delete project', 'danger');
+            }
+        } catch (err) {
+            showToast(err.message || 'Error deleting project', 'danger');
+        }
+    }
+}
+
+/**
  * Handle Create Project Modal
  */
 function initNewProjectModal() {
@@ -59,6 +170,10 @@ function initNewProjectModal() {
         if (e.target === modal) closeModal();
     });
 
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && modal.classList.contains('active')) closeModal();
+    });
+
     if (form) {
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -76,10 +191,9 @@ function initNewProjectModal() {
 
             try {
                 const res = await API.projects.create({ name, description });
-                if (res.success) {
+                if (res.success && res.data) {
                     showToast('Project created successfully!', 'success');
                     closeModal();
-                    // Navigate to the newly created project board
                     window.location.href = `project.php?id=${res.data.id}`;
                 } else {
                     showToast(res.error || 'Failed to create project', 'danger');
@@ -89,6 +203,94 @@ function initNewProjectModal() {
             } finally {
                 submitBtn.disabled = false;
                 submitBtn.textContent = 'Create Project';
+            }
+        });
+    }
+}
+
+/**
+ * Handle Edit Project Modal (Title & Description)
+ */
+function initEditProjectModal() {
+    const modal = document.getElementById('modal-edit-project');
+    const closeBtn = document.getElementById('close-modal-edit-project');
+    const cancelBtn = document.getElementById('cancel-modal-edit-project');
+    const form = document.getElementById('form-edit-project');
+    const idInput = document.getElementById('edit-project-id');
+    const nameInput = document.getElementById('edit-proj-name');
+    const descInput = document.getElementById('edit-proj-desc');
+
+    if (!modal) return;
+
+    const closeModal = () => {
+        modal.classList.remove('active');
+        if (form) form.reset();
+    };
+
+    if (closeBtn) closeBtn.addEventListener('click', closeModal);
+    if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
+
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) closeModal();
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && modal.classList.contains('active')) closeModal();
+    });
+
+    window.openEditProjectModal = function (projectId, currentName, currentDesc) {
+        if (idInput) idInput.value = projectId;
+        if (nameInput) nameInput.value = currentName;
+        if (descInput) descInput.value = currentDesc;
+        modal.classList.add('active');
+        if (nameInput) nameInput.focus();
+    };
+
+    if (form) {
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const submitBtn = form.querySelector('button[type="submit"]');
+            const projectId = parseInt(idInput.value, 10);
+            const name = nameInput.value.trim();
+            const description = descInput.value.trim();
+
+            if (!name) {
+                showToast('Project name cannot be empty.', 'danger');
+                return;
+            }
+
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Saving...';
+
+            try {
+                const res = await API.projects.update({ id: projectId, name, description });
+                if (res.success) {
+                    showToast('Project updated successfully!', 'success');
+                    closeModal();
+
+                    // Update DOM card
+                    const card = document.getElementById(`project-card-${projectId}`);
+                    if (card) {
+                        const titleEl = card.querySelector('.project-title');
+                        const descEl = card.querySelector('.project-desc');
+                        if (titleEl) titleEl.textContent = name;
+                        if (descEl) descEl.textContent = description || 'No description provided.';
+
+                        // Update data attributes
+                        const editBtn = card.querySelector('.btn-edit-project');
+                        if (editBtn) {
+                            editBtn.dataset.projectName = name;
+                            editBtn.dataset.projectDesc = description;
+                        }
+                    }
+                } else {
+                    showToast(res.error || 'Failed to update project', 'danger');
+                }
+            } catch (err) {
+                showToast(err.message || 'Error updating project', 'danger');
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Save Changes';
             }
         });
     }
@@ -124,7 +326,10 @@ function initInviteMemberModal() {
         if (e.target === modal) closeModal();
     });
 
-    // Global trigger function to open invite modal for a specific project
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && modal.classList.contains('active')) closeModal();
+    });
+
     window.openInviteModal = function (projectId, projectName) {
         const projIdInput = document.getElementById('invite-project-id');
         const projNameEl = document.getElementById('invite-project-name');
@@ -215,7 +420,7 @@ function initInviteMemberModal() {
                 if (res.success) {
                     showToast(res.message || 'Member added!', 'success');
                     closeModal();
-                    setTimeout(() => window.location.reload(), 600);
+                    setTimeout(() => window.location.reload(), 500);
                 } else {
                     showToast(res.error || 'Failed to add member', 'danger');
                 }
@@ -224,31 +429,257 @@ function initInviteMemberModal() {
             }
         });
     }
+}
 
-    // Global project delete
-    window.confirmDeleteProject = async function (e, projectId, projectName) {
-        e.stopPropagation();
-        e.preventDefault();
+/**
+ * Handle Team Roster & Role Management Modal
+ */
+function initTeamRosterModal() {
+    const modal = document.getElementById('modal-team-roster');
+    const closeBtn = document.getElementById('close-modal-roster');
+    const closeBtnFooter = document.getElementById('close-btn-roster');
+    const nameEl = document.getElementById('roster-project-name');
+    const listContainer = document.getElementById('roster-list-container');
 
-        if (confirm(`Are you sure you want to permanently delete the project "${projectName}"? All columns, tasks, and comments will be erased.`)) {
-            try {
-                const res = await API.projects.delete(projectId);
-                if (res.success) {
-                    showToast('Project deleted successfully.', 'success');
-                    const card = document.getElementById(`project-card-${projectId}`);
-                    if (card) {
-                        card.style.opacity = '0';
-                        card.style.transform = 'scale(0.95)';
-                        setTimeout(() => card.remove(), 300);
+    if (!modal) return;
+
+    let activeProjectId = null;
+
+    const closeModal = () => {
+        modal.classList.remove('active');
+        if (listContainer) listContainer.innerHTML = '';
+        activeProjectId = null;
+    };
+
+    if (closeBtn) closeBtn.addEventListener('click', closeModal);
+    if (closeBtnFooter) closeBtnFooter.addEventListener('click', closeModal);
+
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) closeModal();
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && modal.classList.contains('active')) closeModal();
+    });
+
+    window.openTeamRosterModal = async function (projectId, projectName) {
+        activeProjectId = projectId;
+        if (nameEl) nameEl.textContent = projectName;
+        modal.classList.add('active');
+        await loadRoster(projectId);
+    };
+
+    async function loadRoster(projectId) {
+        if (!listContainer) return;
+        listContainer.innerHTML = '<div style="padding:1.5rem; text-align:center; color:var(--text-muted);">Loading team roster...</div>';
+
+        try {
+            const res = await API.projects.getMembers(projectId);
+            if (res.success && res.data) {
+                renderRoster(res.data);
+            } else {
+                listContainer.innerHTML = `<div style="padding:1rem; color:var(--danger);">${escapeHtml(res.error || 'Failed to load roster')}</div>`;
+            }
+        } catch (err) {
+            listContainer.innerHTML = `<div style="padding:1rem; color:var(--danger);">${escapeHtml(err.message || 'Error loading roster')}</div>`;
+        }
+    }
+
+    function renderRoster(members) {
+        if (!listContainer) return;
+        listContainer.innerHTML = '';
+
+        if (members.length === 0) {
+            listContainer.innerHTML = '<div style="padding:1rem; color:var(--text-muted); text-align:center;">No members in this project.</div>';
+            return;
+        }
+
+        members.forEach(m => {
+            const row = document.createElement('div');
+            row.style.cssText = 'display:flex; align-items:center; justify-content:space-between; padding:0.85rem 1rem; background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:var(--radius-md); gap:1rem; flex-wrap:wrap;';
+
+            const isOwner = (parseInt(m.is_owner, 10) === 1);
+
+            let roleControlHtml = '';
+            if (isOwner) {
+                roleControlHtml = '<span class="badge" style="background:rgba(99,102,241,0.2); color:var(--primary); font-size:0.75rem;">Owner</span>';
+            } else {
+                roleControlHtml = `
+                    <div style="display:flex; align-items:center; gap:0.5rem;">
+                        <select class="form-select roster-role-select" data-user-id="${m.id}" style="padding:0.35rem 1.8rem 0.35rem 0.65rem; font-size:0.8rem; width:110px;">
+                            <option value="member" ${m.role === 'member' ? 'selected' : ''}>Member</option>
+                            <option value="admin" ${m.role === 'admin' ? 'selected' : ''}>Admin</option>
+                        </select>
+                        <button type="button" class="btn btn-ghost btn-sm btn-remove-member" data-user-id="${m.id}" data-username="${escapeHtml(m.username)}" title="Remove member" style="color:var(--danger);">
+                            ✕
+                        </button>
+                    </div>
+                `;
+            }
+
+            row.innerHTML = `
+                <div style="display:flex; align-items:center; gap:0.75rem;">
+                    <div class="avatar" style="background-color:${m.avatar_color || '#6366f1'};">
+                        ${m.username.substring(0, 2).toUpperCase()}
+                    </div>
+                    <div>
+                        <div style="font-weight:700; color:var(--text-primary); font-size:0.9rem;">
+                            ${escapeHtml(m.username)}
+                            ${isOwner ? '<span style="font-size:0.7rem; color:var(--accent-cyan); margin-left:0.3rem;">★ Lead</span>' : ''}
+                        </div>
+                        <div style="font-size:0.775rem; color:var(--text-muted);">${escapeHtml(m.email)}</div>
+                    </div>
+                </div>
+                ${roleControlHtml}
+            `;
+
+            // Event Listeners on role change and remove
+            const select = row.querySelector('.roster-role-select');
+            if (select) {
+                select.addEventListener('change', async (e) => {
+                    const newRole = e.target.value;
+                    try {
+                        const res = await API.projects.updateMemberRole(activeProjectId, m.id, newRole);
+                        if (res.success) {
+                            showToast(`Updated ${m.username}'s role to ${newRole}.`, 'success');
+                        } else {
+                            showToast(res.error || 'Failed to update role', 'danger');
+                            select.value = m.role;
+                        }
+                    } catch (err) {
+                        showToast(err.message || 'Error updating role', 'danger');
+                        select.value = m.role;
                     }
+                });
+            }
+
+            const removeBtn = row.querySelector('.btn-remove-member');
+            if (removeBtn) {
+                removeBtn.addEventListener('click', async () => {
+                    const confirmed = await showConfirmDialog(
+                        'Remove Member',
+                        `Remove "${m.username}" from this project? They will lose access to board tasks.`,
+                        'Remove',
+                        true
+                    );
+                    if (confirmed) {
+                        try {
+                            const res = await API.projects.removeMember(activeProjectId, m.id);
+                            if (res.success) {
+                                showToast(`Removed ${m.username} from project.`, 'info');
+                                row.remove();
+                            } else {
+                                showToast(res.error || 'Failed to remove member', 'danger');
+                            }
+                        } catch (err) {
+                            showToast(err.message || 'Error removing member', 'danger');
+                        }
+                    }
+                });
+            }
+
+            listContainer.appendChild(row);
+        });
+    }
+}
+
+/**
+ * Handle User Profile & Settings Modal
+ */
+function initUserProfileModal() {
+    const triggerBtn = document.getElementById('btn-user-profile');
+    const modal = document.getElementById('modal-user-profile');
+    const closeBtn = document.getElementById('close-modal-profile');
+    const cancelBtn = document.getElementById('cancel-modal-profile');
+    const form = document.getElementById('form-user-profile');
+    const swatches = document.querySelectorAll('.color-swatch');
+
+    if (!modal) return;
+
+    const openModal = () => modal.classList.add('active');
+    const closeModal = () => modal.classList.remove('active');
+
+    if (triggerBtn) triggerBtn.addEventListener('click', openModal);
+    if (closeBtn) closeBtn.addEventListener('click', closeModal);
+    if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
+
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) closeModal();
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && modal.classList.contains('active')) closeModal();
+    });
+
+    // Swatch selection styling
+    swatches.forEach(swatch => {
+        swatch.addEventListener('click', () => {
+            swatches.forEach(s => s.style.borderColor = 'transparent');
+            swatch.style.borderColor = '#ffffff';
+            const radio = swatch.previousElementSibling;
+            if (radio) radio.checked = true;
+        });
+    });
+
+    if (form) {
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const submitBtn = document.getElementById('btn-save-profile');
+            const username = document.getElementById('profile-username').value.trim();
+            const email = document.getElementById('profile-email').value.trim();
+            const avatarColor = form.querySelector('[name="avatar_color"]:checked')?.value || '#6366f1';
+            const currentPass = document.getElementById('profile-current-pass').value;
+            const newPass = document.getElementById('profile-new-pass').value;
+
+            if (!username || !email) {
+                showToast('Username and email cannot be empty.', 'danger');
+                return;
+            }
+
+            if (newPass && !currentPass) {
+                showToast('Please enter your current password to set a new password.', 'danger');
+                return;
+            }
+
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Updating...';
+
+            try {
+                const res = await API.projects.updateProfile({
+                    username,
+                    email,
+                    avatar_color: avatarColor,
+                    current_password: currentPass,
+                    new_password: newPass
+                });
+
+                if (res.success && res.data) {
+                    showToast('Profile updated successfully!', 'success');
+                    closeModal();
+
+                    // Update Navbar UI
+                    const navName = document.getElementById('nav-user-name');
+                    const navAvatar = document.getElementById('nav-user-avatar');
+                    if (navName) navName.textContent = res.data.username;
+                    if (navAvatar) {
+                        navAvatar.style.backgroundColor = res.data.avatar_color;
+                        navAvatar.textContent = res.data.username.substring(0, 2).toUpperCase();
+                    }
+
+                    // Clear password fields
+                    document.getElementById('profile-current-pass').value = '';
+                    document.getElementById('profile-new-pass').value = '';
                 } else {
-                    showToast(res.error || 'Failed to delete project', 'danger');
+                    showToast(res.error || 'Failed to update profile', 'danger');
                 }
             } catch (err) {
-                showToast(err.message || 'Error deleting project', 'danger');
+                showToast(err.message || 'Error updating profile', 'danger');
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Update Profile';
             }
-        }
-    };
+        });
+    }
 }
 
 /**
@@ -281,11 +712,17 @@ function initNotificationDropdown() {
         }
     });
 
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && menu.classList.contains('active')) {
+            menu.classList.remove('active');
+        }
+    });
+
     async function loadNotifications() {
         if (!list) return;
         try {
             const res = await API.projects.getNotifications();
-            if (res.success) {
+            if (res.success && res.data) {
                 renderNotifications(res.data.notifications || []);
                 updateBadge(res.data.unread_count || 0);
             }
@@ -299,7 +736,7 @@ function initNotificationDropdown() {
         list.innerHTML = '';
 
         if (notifs.length === 0) {
-            list.innerHTML = '<div style="padding:1rem; text-align:center; color:var(--text-muted); font-size:0.85rem;">No notifications yet.</div>';
+            list.innerHTML = '<div style="padding:1.5rem; text-align:center; color:var(--text-muted); font-size:0.85rem;">No notifications yet.</div>';
             return;
         }
 
@@ -340,6 +777,5 @@ function initNotificationDropdown() {
         });
     }
 
-    // Expose global notification updater for real_time.js
     window.updateNotificationBadge = updateBadge;
 }

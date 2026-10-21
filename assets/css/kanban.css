@@ -85,6 +85,100 @@
     min-height: 90px;
 }
 
+/* Add Task Button at Column Footer */
+.add-task-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    margin: 0.25rem 0.95rem 0.95rem;
+    border-radius: var(--radius-md);
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px dashed rgba(255, 255, 255, 0.12);
+    color: var(--text-secondary);
+    font-size: 0.825rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    outline: none;
+}
+
+.add-task-btn:hover {
+    background: rgba(99, 102, 241, 0.12);
+    border-color: var(--primary);
+    color: var(--text-primary);
+    box-shadow: 0 0 14px rgba(99, 102, 241, 0.25);
+    transform: translateY(-1px);
+}
+
+.add-task-btn:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+}
+
+/* Empty Column Drop State */
+.column-empty-state {
+    padding: 2.25rem 1rem;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.825rem;
+    border: 1px dashed rgba(255, 255, 255, 0.08);
+    border-radius: var(--radius-md);
+    background: rgba(255, 255, 255, 0.015);
+    margin: 0.5rem 0;
+    pointer-events: none;
+    line-height: 1.4;
+}
+
+/* Add New Column Outer Card */
+.add-column-card {
+    width: var(--column-width);
+    min-width: var(--column-width);
+    max-width: var(--column-width);
+    background: rgba(18, 21, 38, 0.45);
+    border: 2px dashed rgba(255, 255, 255, 0.12);
+    border-radius: var(--radius-lg);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.85rem;
+    min-height: 180px;
+    cursor: pointer;
+    color: var(--text-secondary);
+    transition: all var(--transition-fast);
+    flex-shrink: 0;
+}
+
+.add-column-card:hover {
+    background: rgba(26, 30, 54, 0.7);
+    border-color: var(--accent-cyan);
+    color: var(--text-primary);
+    box-shadow: 0 0 20px rgba(6, 182, 212, 0.2);
+    transform: translateY(-2px);
+}
+
+/* Column Move Arrow Controls */
+.col-move-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 0.2rem 0.35rem;
+    border-radius: var(--radius-sm);
+    font-size: 0.8rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.col-move-btn:hover {
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.08);
+}
+
 /* 2. Task Card */
 .task-card {
     background: var(--card-bg);
@@ -120,6 +214,21 @@
     border: 1px dashed var(--accent-cyan);
 }
 
+/* Highlighted Task Animation (from notification deep link) */
+@keyframes highlightPulse {
+    0%, 100% {
+        box-shadow: 0 0 0 3px rgba(6, 182, 212, 0.8), 0 0 25px rgba(6, 182, 212, 0.5);
+    }
+    50% {
+        box-shadow: 0 0 0 5px rgba(99, 102, 241, 0.9), 0 0 35px rgba(99, 102, 241, 0.6);
+    }
+}
+
+.task-card-highlighted {
+    animation: highlightPulse 1.4s ease-in-out 3;
+    border-color: var(--accent-cyan) !important;
+}
+
 /* Drop Placeholder */
 .drag-placeholder {
     height: 80px;
@@ -130,7 +239,7 @@
     transition: height var(--transition-fast);
 }
 
-.task-card-header {
+.card-meta-top {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -155,7 +264,7 @@
     overflow: hidden;
 }
 
-.task-card-footer {
+.card-meta-bottom {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -170,30 +279,6 @@
     gap: 0.65rem;
     font-size: 0.75rem;
     color: var(--text-muted);
-}
-
-.due-date-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.3rem;
-    font-size: 0.725rem;
-    font-weight: 600;
-    padding: 0.15rem 0.45rem;
-    border-radius: var(--radius-sm);
-    background: rgba(255, 255, 255, 0.05);
-    color: var(--text-secondary);
-}
-
-.due-date-pill.overdue {
-    background: rgba(239, 68, 68, 0.15);
-    color: #f87171;
-    border: 1px solid rgba(239, 68, 68, 0.3);
-}
-
-.due-date-pill.today {
-    background: rgba(245, 158, 11, 0.15);
-    color: #fbbf24;
-    border: 1px solid rgba(245, 158, 11, 0.3);
 }
 
 /* 3. Task Detail Modal Grid */
@@ -228,8 +313,8 @@
 .comments-feed {
     display: flex;
     flex-direction: column;
-    gap: 0.95rem;
-    max-height: 250px;
+    gap: 0.85rem;
+    max-height: 220px;
     overflow-y: auto;
     padding-right: 0.5rem;
 }
@@ -249,20 +334,27 @@
     flex: 1;
 }
 
-.comment-author {
-    font-weight: 700;
-    color: var(--text-primary);
-    margin-right: 0.4rem;
+.comment-author-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.25rem;
 }
 
-.comment-time {
+.comment-author-name {
+    font-weight: 700;
+    color: var(--text-primary);
+    font-size: 0.8rem;
+}
+
+.comment-timestamp {
     font-size: 0.7rem;
     color: var(--text-muted);
 }
 
-.comment-text {
-    margin-top: 0.25rem;
+.comment-body {
     color: var(--text-secondary);
-    line-height: 1.4;
+    line-height: 1.45;
     word-break: break-word;
 }

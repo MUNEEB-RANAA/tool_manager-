@@ -13,7 +13,9 @@ if (!$projectId) {
 }
 
 if (!checkProjectAccess($projectId, $currentUser['id'], $pdo)) {
-    echo "<!DOCTYPE html><html><body style='background:#0f111a;color:#ff6b6b;font-family:sans-serif;padding:3rem;'><h2>Access Denied</h2><p>You do not have permission to view this project board.</p><p><a href='dashboard.php' style='color:#6366f1;'>← Return to Dashboard</a></p></body></html>";
+    echo "<!DOCTYPE html><html><body style='background:#0a0c16;color:#f87171;font-family:sans-serif;padding:3.5rem;text-align:center;'>";
+    echo "<h2>Access Denied</h2><p style='color:#94a3b8;margin:1rem 0;'>You do not have permission to view this project board.</p>";
+    echo "<a href='dashboard.php' style='color:#6366f1;text-decoration:none;font-weight:600;'>← Return to Dashboard</a></body></html>";
     exit;
 }
 
@@ -32,7 +34,13 @@ if (!$project) {
     exit;
 }
 
-$isOwner = ((int)$project['owner_id'] === $currentUser['id']);
+$userRole = getProjectMemberRole($projectId, $currentUser['id'], $pdo);
+$isOwner = ($userRole === 'owner');
+$isAdmin = in_array($userRole, ['owner', 'admin'], true);
+
+$project['user_role'] = $userRole;
+$project['is_owner'] = $isOwner;
+$project['is_admin'] = $isAdmin;
 
 // Fetch Project Members
 $stmtMembers = $pdo->prepare("
@@ -108,9 +116,9 @@ $unreadNotifs = (int)$stmtNotifs->fetchColumn();
 
 // Serialize initial board state for instant hydration
 $initialStateJson = json_encode([
-    'project' => $project,
-    'members' => $members,
-    'columns' => $columns,
+    'project'      => $project,
+    'members'      => $members,
+    'columns'      => $columns,
     'last_updated' => $project['updated_at']
 ], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE);
 ?>
@@ -120,6 +128,7 @@ $initialStateJson = json_encode([
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?php echo htmlspecialchars($project['name']); ?> | Tool Manager</title>
+    <meta name="csrf-token" content="<?php echo htmlspecialchars($currentUser['csrf_token']); ?>">
     <link rel="icon" type="image/svg+xml" href="assets/img/favicon.svg">
     <link rel="stylesheet" href="assets/css/variables.css">
     <link rel="stylesheet" href="assets/css/layout.css">
@@ -130,7 +139,7 @@ $initialStateJson = json_encode([
 
     <!-- Main Navigation Bar -->
     <header class="navbar">
-        <div style="display:flex; align-items:center; gap:1.25rem;">
+        <div style="display:flex; align-items:center; gap:1.15rem; flex-wrap:wrap;">
             <a href="dashboard.php" class="nav-brand">
                 <div class="brand-icon-wrap">
                     <img src="assets/img/logo.svg" alt="Tool Manager">
@@ -139,10 +148,15 @@ $initialStateJson = json_encode([
                 <span class="brand-tag">Flow</span>
             </a>
             <span style="color:var(--text-muted); font-size:1.1rem;">/</span>
-            <div style="display:flex; align-items:center; gap:0.5rem;">
-                <span style="font-weight:700; font-size:1rem; color:var(--text-primary);"><?php echo htmlspecialchars($project['name']); ?></span>
-                <?php if ($isOwner): ?>
-                    <span class="badge" style="background:rgba(99,102,241,0.15); color:var(--primary); font-size:0.65rem;">Owner</span>
+            <div style="display:flex; align-items:center; gap:0.55rem;">
+                <span id="board-project-title" style="font-weight:700; font-size:1.05rem; color:var(--text-primary);"><?php echo htmlspecialchars($project['name']); ?></span>
+                <span class="badge" style="background:<?php echo $isOwner ? 'rgba(99,102,241,0.15)' : 'rgba(6,182,212,0.15)'; ?>; color:<?php echo $isOwner ? 'var(--primary)' : 'var(--accent-cyan)'; ?>; font-size:0.65rem;">
+                    <?php echo $isOwner ? 'Owner' : ($isAdmin ? 'Admin' : 'Member'); ?>
+                </span>
+                <?php if ($isAdmin): ?>
+                    <button type="button" class="btn btn-ghost btn-sm btn-icon" id="btn-edit-project-header" title="Edit Project Details" aria-label="Edit Project">
+                        <span>✏️</span>
+                    </button>
                 <?php endif; ?>
             </div>
         </div>
@@ -154,9 +168,9 @@ $initialStateJson = json_encode([
         </div>
 
         <div class="nav-actions">
-            <!-- Team Avatars Stack -->
+            <!-- Team Avatars Stack & Management -->
             <div style="display:flex; align-items:center; gap:0.5rem; margin-right:0.5rem;">
-                <div class="avatar-group">
+                <div class="avatar-group" id="board-avatar-group">
                     <?php foreach (array_slice($members, 0, 4) as $m): ?>
                         <div class="avatar avatar-sm" style="background-color:<?php echo htmlspecialchars($m['avatar_color']); ?>;" title="<?php echo htmlspecialchars($m['username']) . ' (' . $m['role'] . ')'; ?>">
                             <?php echo strtoupper(substr($m['username'], 0, 2)); ?>
@@ -166,14 +180,20 @@ $initialStateJson = json_encode([
                         <div class="avatar avatar-sm" style="background:#334155;">+<?php echo count($members) - 4; ?></div>
                     <?php endif; ?>
                 </div>
-                <button type="button" class="btn btn-secondary btn-sm" onclick="openInviteModal(<?php echo $projectId; ?>, '<?php echo htmlspecialchars(addslashes($project['name'])); ?>');">
-                    + Invite
-                </button>
+
+                <?php if ($isAdmin): ?>
+                    <button type="button" class="btn btn-secondary btn-sm" id="btn-manage-team-roster" title="Manage Team Roster">
+                        👥 Team
+                    </button>
+                    <button type="button" class="btn btn-secondary btn-sm" id="btn-open-invite-board" title="Invite User">
+                        + Invite
+                    </button>
+                <?php endif; ?>
             </div>
 
             <!-- Notifications Dropdown -->
             <div class="dropdown-wrapper">
-                <button type="button" class="btn btn-secondary btn-icon" id="notif-dropdown-btn" title="Notifications">
+                <button type="button" class="btn btn-secondary btn-icon" id="notif-dropdown-btn" title="Notifications" aria-label="Notifications" style="position:relative;">
                     <span>🔔</span>
                     <span class="notif-counter" id="notif-badge" style="<?php echo $unreadNotifs > 0 ? '' : 'display:none;'; ?>">
                         <?php echo $unreadNotifs > 99 ? '99+' : $unreadNotifs; ?>
@@ -191,25 +211,32 @@ $initialStateJson = json_encode([
                 </div>
             </div>
 
-            <!-- User Avatar & Dashboard Link -->
-            <div style="display:flex; align-items:center; gap:0.6rem; margin-left:0.35rem;">
+            <!-- User Avatar & Profile Modal -->
+            <button type="button" class="btn btn-ghost" id="btn-user-profile" title="Account Settings" style="padding:0.25rem 0.5rem; display:flex; align-items:center; gap:0.5rem;">
+                <div class="avatar avatar-sm" id="nav-user-avatar" style="background-color:<?php echo htmlspecialchars($currentUser['avatar_color']); ?>;">
+                    <?php echo strtoupper(substr($currentUser['username'], 0, 2)); ?>
+                </div>
+            </button>
+
+            <!-- Dashboard Link & Sign Out -->
+            <div style="display:flex; align-items:center; gap:0.4rem; margin-left:0.25rem;">
                 <a href="dashboard.php" class="btn btn-ghost btn-sm" title="Back to Dashboard">Dashboard</a>
                 <a href="logout.php" class="btn btn-ghost btn-sm" title="Sign out" style="color:var(--text-muted);">Sign out</a>
             </div>
         </div>
     </header>
 
-    <!-- Sub-Navbar: Filter and Board Actions -->
+    <!-- Sub-Navbar: Multi-Dimensional Filter and Board Actions -->
     <div class="board-subnav">
-        <div class="board-title-area">
+        <div class="board-title-area" style="flex-wrap:wrap; gap:0.65rem;">
             <!-- Search tasks input -->
-            <div style="width:240px;">
-                <input type="text" id="board-search-input" class="form-control" placeholder="🔍 Search tasks..." style="padding:0.4rem 0.75rem; font-size:0.8rem;">
+            <div style="width:200px;">
+                <input type="text" id="board-search-input" class="form-control" placeholder="🔍 Search tasks..." style="padding:0.4rem 0.75rem; font-size:0.8rem;" aria-label="Search board tasks">
             </div>
 
             <!-- Priority Filter Dropdown -->
-            <div style="width:160px;">
-                <select id="board-priority-filter" class="form-select" style="padding:0.4rem 0.75rem; font-size:0.8rem;">
+            <div style="width:135px;">
+                <select id="board-priority-filter" class="form-select" style="padding:0.4rem 1.8rem 0.4rem 0.75rem; font-size:0.8rem;" aria-label="Filter by priority">
                     <option value="all">All Priorities</option>
                     <option value="urgent">Urgent</option>
                     <option value="high">High</option>
@@ -217,18 +244,45 @@ $initialStateJson = json_encode([
                     <option value="low">Low</option>
                 </select>
             </div>
+
+            <!-- Assignee Filter Dropdown -->
+            <div style="width:145px;">
+                <select id="board-assignee-filter" class="form-select" style="padding:0.4rem 1.8rem 0.4rem 0.75rem; font-size:0.8rem;" aria-label="Filter by assignee">
+                    <option value="all">All Assignees</option>
+                    <option value="me">Assigned to Me</option>
+                    <?php foreach ($members as $m): ?>
+                        <option value="<?php echo $m['id']; ?>"><?php echo htmlspecialchars($m['username']); ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+
+            <!-- Due Filter Dropdown -->
+            <div style="width:130px;">
+                <select id="board-due-filter" class="form-select" style="padding:0.4rem 1.8rem 0.4rem 0.75rem; font-size:0.8rem;" aria-label="Filter by due status">
+                    <option value="all">All Dates</option>
+                    <option value="overdue">Overdue</option>
+                    <option value="today">Due Today</option>
+                    <option value="upcoming">Upcoming</option>
+                </select>
+            </div>
+
+            <button type="button" class="btn btn-ghost btn-sm" id="btn-clear-filters" style="display:none; font-size:0.75rem; padding:0.35rem 0.65rem; color:var(--text-muted);" title="Reset filters">
+                Clear ✕
+            </button>
         </div>
 
         <div class="board-actions">
-            <button type="button" class="btn btn-secondary btn-sm" onclick="openNewColumnModal()">
-                <span>+ Add Column</span>
-            </button>
+            <?php if ($isAdmin): ?>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="openNewColumnModal()">
+                    <span>+ Add Column</span>
+                </button>
+            <?php endif; ?>
         </div>
     </div>
 
     <!-- Main Kanban Board Container (Horizontal Scroll) -->
     <main class="board-page-container">
-        <div class="kanban-viewport" id="kanban-board-container" data-project-id="<?php echo $projectId; ?>">
+        <div class="kanban-viewport" id="kanban-board-container" data-project-id="<?php echo $projectId; ?>" data-current-user-id="<?php echo $currentUser['id']; ?>">
             <!-- Columns rendered here and synced live via kanban.js -->
         </div>
     </main>
@@ -242,7 +296,7 @@ $initialStateJson = json_encode([
         <div class="modal-container modal-lg">
             <div class="modal-header">
                 <div style="display:flex; align-items:center; gap:0.65rem;">
-                    <span class="badge" style="background:rgba(255,255,255,0.06); color:var(--text-secondary);" id="task-detail-column-name">Column</span>
+                    <span class="badge" style="background:rgba(255,255,255,0.08); color:var(--text-secondary);" id="task-detail-column-name">Column</span>
                     <h3 class="modal-title">Task Details</h3>
                 </div>
                 <button type="button" class="modal-close" id="close-modal-task-detail">✕</button>
@@ -252,19 +306,19 @@ $initialStateJson = json_encode([
                 <div class="task-modal-grid">
                     <!-- Main details column -->
                     <div class="task-modal-main">
-                        <div class="form-group" style="margin-bottom:0.75rem;">
-                            <label class="form-label">Task Title</label>
+                        <div class="form-group" style="margin-bottom:0.85rem;">
+                            <label class="form-label" for="task-detail-title">Task Title *</label>
                             <input type="text" id="task-detail-title" class="form-control" style="font-size:1.05rem; font-weight:700;">
                         </div>
 
-                        <div class="form-group" style="margin-bottom:0.75rem;">
-                            <label class="form-label">Description</label>
-                            <textarea id="task-detail-desc" class="form-textarea" style="min-height:100px;" placeholder="Add detailed specifications, checklist, or acceptance criteria..."></textarea>
+                        <div class="form-group" style="margin-bottom:0.85rem;">
+                            <label class="form-label" for="task-detail-desc">Description</label>
+                            <textarea id="task-detail-desc" class="form-textarea" style="min-height:95px;" placeholder="Add detailed specifications, checklist, or acceptance criteria..."></textarea>
                         </div>
 
                         <!-- Real-Time Comments Discussion -->
-                        <div style="margin-top:1rem; border-top:1px solid var(--border-color); padding-top:1rem;">
-                            <h4 style="font-size:0.95rem; font-weight:700; color:var(--text-primary); margin-bottom:0.75rem; display:flex; align-items:center; gap:0.5rem;">
+                        <div style="margin-top:1rem; border-top:1px solid var(--border-color); padding-top:1rem; display:flex; flex-direction:column; flex:1;">
+                            <h4 style="font-size:0.925rem; font-weight:700; color:var(--text-primary); margin-bottom:0.75rem; display:flex; align-items:center; gap:0.5rem;">
                                 <span>Discussion & Activity</span>
                                 <span class="pulse-dot" style="width:6px; height:6px;"></span>
                             </h4>
@@ -285,7 +339,7 @@ $initialStateJson = json_encode([
                     <!-- Sidebar settings column -->
                     <div class="task-modal-sidebar">
                         <div class="form-group" style="margin-bottom:0.75rem;">
-                            <label class="form-label">Priority</label>
+                            <label class="form-label" for="task-detail-priority">Priority</label>
                             <select id="task-detail-priority" class="form-select">
                                 <option value="low">Low</option>
                                 <option value="medium">Medium</option>
@@ -295,13 +349,13 @@ $initialStateJson = json_encode([
                         </div>
 
                         <div class="form-group" style="margin-bottom:0.75rem;">
-                            <label class="form-label">Due Date</label>
+                            <label class="form-label" for="task-detail-due">Due Date</label>
                             <input type="date" id="task-detail-due" class="form-control">
                         </div>
 
                         <div class="form-group" style="margin-bottom:0;">
                             <label class="form-label">Assigned Members</label>
-                            <div id="task-detail-assignees-list" style="max-height:160px; overflow-y:auto;">
+                            <div id="task-detail-assignees-list" style="max-height:160px; overflow-y:auto; padding-right:0.25rem;">
                                 <!-- Checkboxes populated dynamically -->
                             </div>
                         </div>
@@ -316,6 +370,7 @@ $initialStateJson = json_encode([
             </div>
 
             <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" id="cancel-task-detail">Cancel</button>
                 <button type="button" class="btn btn-primary" id="btn-save-task-detail">Save Changes</button>
             </div>
         </div>
@@ -333,19 +388,19 @@ $initialStateJson = json_encode([
 
                 <div class="modal-body">
                     <div class="form-group">
-                        <label class="form-label">Title *</label>
-                        <input type="text" name="title" class="form-control" placeholder="e.g. Implement resilient circuit breaker" required autofocus>
+                        <label class="form-label" for="new-task-title">Title *</label>
+                        <input type="text" id="new-task-title" name="title" class="form-control" placeholder="e.g. Implement resilient circuit breaker" required autofocus>
                     </div>
 
                     <div class="form-group">
-                        <label class="form-label">Description</label>
-                        <textarea name="description" class="form-textarea" placeholder="Describe the task requirements..."></textarea>
+                        <label class="form-label" for="new-task-desc">Description</label>
+                        <textarea id="new-task-desc" name="description" class="form-textarea" placeholder="Describe the task specifications or acceptance criteria..."></textarea>
                     </div>
 
                     <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
                         <div class="form-group">
-                            <label class="form-label">Priority</label>
-                            <select name="priority" class="form-select">
+                            <label class="form-label" for="new-task-priority">Priority</label>
+                            <select id="new-task-priority" name="priority" class="form-select">
                                 <option value="low">Low</option>
                                 <option value="medium" selected>Medium</option>
                                 <option value="high">High</option>
@@ -354,8 +409,8 @@ $initialStateJson = json_encode([
                         </div>
 
                         <div class="form-group">
-                            <label class="form-label">Due Date</label>
-                            <input type="date" name="due_date" class="form-control">
+                            <label class="form-label" for="new-task-due">Due Date</label>
+                            <input type="date" id="new-task-due" name="due_date" class="form-control">
                         </div>
                     </div>
 
@@ -385,8 +440,8 @@ $initialStateJson = json_encode([
             <form id="form-new-column">
                 <div class="modal-body">
                     <div class="form-group">
-                        <label class="form-label">Column Name *</label>
-                        <input type="text" name="name" class="form-control" placeholder="e.g. In Testing / UAT" required autofocus>
+                        <label class="form-label" for="new-col-name">Column Name *</label>
+                        <input type="text" id="new-col-name" name="name" class="form-control" placeholder="e.g. In Testing / QA Review" required autofocus>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -410,7 +465,7 @@ $initialStateJson = json_encode([
 
                 <div class="modal-body">
                     <div class="form-group">
-                        <label class="form-label">Search Users (by username or email)</label>
+                        <label class="form-label" for="invite-user-search">Search Users (by username or email)</label>
                         <input type="text" id="invite-user-search" class="form-control" placeholder="Type at least 2 characters...">
                     </div>
 
@@ -420,8 +475,8 @@ $initialStateJson = json_encode([
                     <div id="user-search-results" style="max-height:160px; overflow-y:auto; margin-bottom:1rem;"></div>
 
                     <div class="form-group">
-                        <label class="form-label">Assign Role</label>
-                        <select name="role" class="form-select">
+                        <label class="form-label" for="invite-role">Assign Role</label>
+                        <select id="invite-role" name="role" class="form-select">
                             <option value="member" selected>Member (Can view, create & move tasks)</option>
                             <option value="admin">Admin (Can manage columns & project settings)</option>
                         </select>
@@ -435,18 +490,134 @@ $initialStateJson = json_encode([
         </div>
     </div>
 
+    <!-- 5. Edit Project Details Modal -->
+    <div class="modal-backdrop" id="modal-edit-project">
+        <div class="modal-container">
+            <div class="modal-header">
+                <h3 class="modal-title">Edit Project Details</h3>
+                <button type="button" class="modal-close" id="close-modal-edit-project">✕</button>
+            </div>
+            <form id="form-edit-project">
+                <input type="hidden" id="edit-project-id" value="<?php echo $projectId; ?>">
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label class="form-label" for="edit-proj-name">Project Name *</label>
+                        <input type="text" id="edit-proj-name" name="name" class="form-control" value="<?php echo htmlspecialchars($project['name']); ?>" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" for="edit-proj-desc">Description</label>
+                        <textarea id="edit-proj-desc" name="description" class="form-textarea"><?php echo htmlspecialchars($project['description'] ?? ''); ?></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" id="cancel-modal-edit-project">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 6. Team Roster & Role Management Modal -->
+    <div class="modal-backdrop" id="modal-team-roster">
+        <div class="modal-container modal-lg">
+            <div class="modal-header">
+                <h3 class="modal-title">Team Roster: <span id="roster-project-name" style="color:var(--primary);"><?php echo htmlspecialchars($project['name']); ?></span></h3>
+                <button type="button" class="modal-close" id="close-modal-roster">✕</button>
+            </div>
+            <div class="modal-body">
+                <div id="roster-list-container" style="display:flex; flex-direction:column; gap:0.65rem;">
+                    <!-- Populated dynamically via JS -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" id="close-btn-roster">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 7. User Profile & Settings Modal -->
+    <div class="modal-backdrop" id="modal-user-profile">
+        <div class="modal-container">
+            <div class="modal-header">
+                <h3 class="modal-title">Account & Security Settings</h3>
+                <button type="button" class="modal-close" id="close-modal-profile">✕</button>
+            </div>
+            <form id="form-user-profile">
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label class="form-label" for="profile-username">Username *</label>
+                        <input type="text" id="profile-username" name="username" class="form-control" value="<?php echo htmlspecialchars($currentUser['username']); ?>" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" for="profile-email">Email Address *</label>
+                        <input type="email" id="profile-email" name="email" class="form-control" value="<?php echo htmlspecialchars($currentUser['email']); ?>" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Avatar Badge Color</label>
+                        <div style="display:flex; gap:0.65rem; margin-top:0.35rem;" id="avatar-color-picker">
+                            <?php foreach (['#6366f1', '#ec4899', '#10b981', '#f59e0b', '#06b6d4', '#8b5cf6', '#3b82f6'] as $color): ?>
+                                <label style="cursor:pointer; display:flex; align-items:center;">
+                                    <input type="radio" name="avatar_color" value="<?php echo $color; ?>" <?php echo $currentUser['avatar_color'] === $color ? 'checked' : ''; ?> style="display:none;">
+                                    <span style="width:28px; height:28px; border-radius:50%; background:<?php echo $color; ?>; display:inline-block; border:2px solid <?php echo $currentUser['avatar_color'] === $color ? '#ffffff' : 'transparent'; ?>; box-shadow:0 0 8px rgba(0,0,0,0.4);" class="color-swatch" data-color="<?php echo $color; ?>"></span>
+                                </label>
+                            <?php endforeach; ?>
+                        </div>
+                    </div>
+
+                    <div style="border-top:1px solid var(--border-color); padding-top:1rem; margin-top:1rem;">
+                        <h4 style="font-size:0.85rem; font-weight:700; color:var(--text-secondary); margin-bottom:0.75rem;">Change Password (leave blank to keep current)</h4>
+                        
+                        <div class="form-group">
+                            <label class="form-label" for="profile-current-pass">Current Password</label>
+                            <input type="password" id="profile-current-pass" name="current_password" class="form-control" placeholder="••••••••">
+                        </div>
+
+                        <div class="form-group">
+                            <label class="form-label" for="profile-new-pass">New Password</label>
+                            <input type="password" id="profile-new-pass" name="new_password" class="form-control" placeholder="Min 6 characters">
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" id="cancel-modal-profile">Cancel</button>
+                    <button type="submit" class="btn btn-primary" id="btn-save-profile">Update Profile</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- Load Client Scripts in Sequence -->
     <script src="assets/js/api.js"></script>
     <script src="assets/js/dashboard.js"></script>
     <script src="assets/js/kanban.js"></script>
     <script src="assets/js/real_time.js"></script>
 
-    <!-- Initial Board State Hydration -->
+    <!-- Initial Board State Hydration & Deep-linking -->
     <script>
         const initialBoardPayload = <?php echo $initialStateJson; ?>;
         document.addEventListener('DOMContentLoaded', () => {
             if (window.renderBoard && initialBoardPayload) {
                 renderBoard(initialBoardPayload);
+
+                // Deep-link check for ?task=ID in URL
+                const urlParams = new URLSearchParams(window.location.search);
+                const linkedTaskId = urlParams.get('task');
+                if (linkedTaskId && window.openTaskDetailModal) {
+                    const tid = parseInt(linkedTaskId, 10);
+                    if (tid) {
+                        setTimeout(() => {
+                            openTaskDetailModal(tid);
+                            const card = document.getElementById(`task-card-${tid}`);
+                            if (card) {
+                                card.classList.add('task-card-highlighted');
+                                card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            }
+                        }, 150);
+                    }
+                }
             }
         });
     </script>

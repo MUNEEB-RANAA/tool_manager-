@@ -1,6 +1,11 @@
 <?php
 declare(strict_types=1);
 
+/**
+ * Tool Manager - Columns API Endpoint
+ * Hardened RBAC (Admin required for modifications), CSRF Protected
+ */
+
 require_once __DIR__ . '/../config/db.php';
 
 $currentUser = requireAuthApi();
@@ -8,7 +13,7 @@ $pdo = getDBConnection();
 $method = $_SERVER['REQUEST_METHOD'];
 
 // ============================================================================
-// 1. GET: Fetch Columns for a Project
+// 1. GET: Fetch Columns for a Project (Members & Admins)
 // ============================================================================
 if ($method === 'GET') {
     $projectId = (int)($_GET['project_id'] ?? 0);
@@ -33,7 +38,7 @@ if ($method === 'GET') {
 }
 
 // ============================================================================
-// 2. POST: Create a New Column
+// 2. POST: Create a New Column (Admin / Owner Only)
 // ============================================================================
 if ($method === 'POST') {
     $input = getJsonInput();
@@ -44,43 +49,53 @@ if ($method === 'POST') {
         jsonResponse(['success' => false, 'error' => 'Project ID and column name are required.'], 400);
     }
 
-    if (!checkProjectAccess($projectId, $currentUser['id'], $pdo)) {
-        jsonResponse(['success' => false, 'error' => 'Access denied.'], 403);
+    if (mb_strlen($name) > 60) {
+        jsonResponse(['success' => false, 'error' => 'Column name must be 60 characters or fewer.'], 400);
     }
 
-    // Determine next position
-    $stmtPos = $pdo->prepare("SELECT COALESCE(MAX(position), -1) + 1 FROM `columns` WHERE project_id = :pid");
-    $stmtPos->execute([':pid' => $projectId]);
-    $nextPos = (int)$stmtPos->fetchColumn();
+    // Require admin access to alter board columns
+    if (!checkProjectAccess($projectId, $currentUser['id'], $pdo, true)) {
+        jsonResponse(['success' => false, 'error' => 'Only project admins or owners can create columns.'], 403);
+    }
 
-    $stmt = $pdo->prepare("
-        INSERT INTO `columns` (`project_id`, `name`, `position`, `created_at`)
-        VALUES (:pid, :name, :pos, NOW())
-    ");
-    $stmt->execute([
-        ':pid'  => $projectId,
-        ':name' => $name,
-        ':pos'  => $nextPos
-    ]);
-    $colId = (int)$pdo->lastInsertId();
+    try {
+        // Determine next position
+        $stmtPos = $pdo->prepare("SELECT COALESCE(MAX(position), -1) + 1 FROM `columns` WHERE project_id = :pid");
+        $stmtPos->execute([':pid' => $projectId]);
+        $nextPos = (int)$stmtPos->fetchColumn();
 
-    touchProject($projectId, $pdo);
+        $stmt = $pdo->prepare("
+            INSERT INTO `columns` (`project_id`, `name`, `position`, `created_at`)
+            VALUES (:pid, :name, :pos, NOW())
+        ");
+        $stmt->execute([
+            ':pid'  => $projectId,
+            ':name' => $name,
+            ':pos'  => $nextPos
+        ]);
+        $colId = (int)$pdo->lastInsertId();
 
-    jsonResponse([
-        'success' => true,
-        'message' => 'Column created successfully.',
-        'data'    => [
-            'id'         => $colId,
-            'project_id' => $projectId,
-            'name'       => $name,
-            'position'   => $nextPos,
-            'tasks'      => []
-        ]
-    ], 201);
+        touchProject($projectId, $pdo);
+
+        jsonResponse([
+            'success' => true,
+            'message' => 'Column created successfully.',
+            'data'    => [
+                'id'         => $colId,
+                'project_id' => $projectId,
+                'name'       => $name,
+                'position'   => $nextPos,
+                'tasks'      => []
+            ]
+        ], 201);
+    } catch (Exception $e) {
+        error_log("Failed to create column: " . $e->getMessage());
+        jsonResponse(['success' => false, 'error' => 'Failed to create column.'], 500);
+    }
 }
 
 // ============================================================================
-// 3. PUT / PATCH: Rename Column or Batch Reorder Columns
+// 3. PUT / PATCH: Rename Column or Batch Reorder Columns (Admin / Owner Only)
 // ============================================================================
 if ($method === 'PUT' || $method === 'PATCH') {
     $input = getJsonInput();
@@ -88,8 +103,8 @@ if ($method === 'PUT' || $method === 'PATCH') {
     // 3.1 Batch Reorder Columns
     if (isset($input['column_ids']) && is_array($input['column_ids'])) {
         $projectId = (int)($input['project_id'] ?? 0);
-        if (!$projectId || !checkProjectAccess($projectId, $currentUser['id'], $pdo)) {
-            jsonResponse(['success' => false, 'error' => 'Access denied.'], 403);
+        if (!$projectId || !checkProjectAccess($projectId, $currentUser['id'], $pdo, true)) {
+            jsonResponse(['success' => false, 'error' => 'Only project admins or owners can reorder columns.'], 403);
         }
 
         $pdo->beginTransaction();
@@ -108,7 +123,8 @@ if ($method === 'PUT' || $method === 'PATCH') {
             jsonResponse(['success' => true, 'message' => 'Columns reordered successfully.']);
         } catch (Exception $e) {
             $pdo->rollBack();
-            jsonResponse(['success' => false, 'error' => 'Failed to reorder columns: ' . $e->getMessage()], 500);
+            error_log("Failed to reorder columns: " . $e->getMessage());
+            jsonResponse(['success' => false, 'error' => 'Failed to reorder columns.'], 500);
         }
     }
 
@@ -120,6 +136,10 @@ if ($method === 'PUT' || $method === 'PATCH') {
         jsonResponse(['success' => false, 'error' => 'Column ID and name are required.'], 400);
     }
 
+    if (mb_strlen($name) > 60) {
+        jsonResponse(['success' => false, 'error' => 'Column name must be 60 characters or fewer.'], 400);
+    }
+
     $stmtCol = $pdo->prepare("SELECT project_id FROM `columns` WHERE id = :id");
     $stmtCol->execute([':id' => $colId]);
     $column = $stmtCol->fetch();
@@ -129,20 +149,25 @@ if ($method === 'PUT' || $method === 'PATCH') {
     }
 
     $projectId = (int)$column['project_id'];
-    if (!checkProjectAccess($projectId, $currentUser['id'], $pdo)) {
-        jsonResponse(['success' => false, 'error' => 'Access denied.'], 403);
+    if (!checkProjectAccess($projectId, $currentUser['id'], $pdo, true)) {
+        jsonResponse(['success' => false, 'error' => 'Only project admins or owners can rename columns.'], 403);
     }
 
-    $stmtUpdate = $pdo->prepare("UPDATE `columns` SET name = :name WHERE id = :id");
-    $stmtUpdate->execute([':name' => $name, ':id' => $colId]);
+    try {
+        $stmtUpdate = $pdo->prepare("UPDATE `columns` SET name = :name WHERE id = :id");
+        $stmtUpdate->execute([':name' => $name, ':id' => $colId]);
 
-    touchProject($projectId, $pdo);
+        touchProject($projectId, $pdo);
 
-    jsonResponse(['success' => true, 'message' => 'Column renamed successfully.']);
+        jsonResponse(['success' => true, 'message' => 'Column renamed successfully.']);
+    } catch (Exception $e) {
+        error_log("Failed to rename column: " . $e->getMessage());
+        jsonResponse(['success' => false, 'error' => 'Failed to rename column.'], 500);
+    }
 }
 
 // ============================================================================
-// 4. DELETE: Delete Column and Cascade its Tasks
+// 4. DELETE: Delete Column and Cascade its Tasks (Admin / Owner Only)
 // ============================================================================
 if ($method === 'DELETE') {
     $input = getJsonInput();
@@ -161,17 +186,22 @@ if ($method === 'DELETE') {
     }
 
     $projectId = (int)$column['project_id'];
-    if (!checkProjectAccess($projectId, $currentUser['id'], $pdo)) {
-        jsonResponse(['success' => false, 'error' => 'Access denied.'], 403);
+    if (!checkProjectAccess($projectId, $currentUser['id'], $pdo, true)) {
+        jsonResponse(['success' => false, 'error' => 'Only project admins or owners can delete columns.'], 403);
     }
 
-    // Delete column
-    $stmtDel = $pdo->prepare("DELETE FROM `columns` WHERE id = :id");
-    $stmtDel->execute([':id' => $colId]);
+    try {
+        // Delete column (cascades tasks via foreign key)
+        $stmtDel = $pdo->prepare("DELETE FROM `columns` WHERE id = :id");
+        $stmtDel->execute([':id' => $colId]);
 
-    touchProject($projectId, $pdo);
+        touchProject($projectId, $pdo);
 
-    jsonResponse(['success' => true, 'message' => 'Column deleted successfully.']);
+        jsonResponse(['success' => true, 'message' => 'Column deleted successfully.']);
+    } catch (Exception $e) {
+        error_log("Failed to delete column: " . $e->getMessage());
+        jsonResponse(['success' => false, 'error' => 'Failed to delete column.'], 500);
+    }
 }
 
 jsonResponse(['success' => false, 'error' => 'Method not allowed.'], 405);

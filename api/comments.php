@@ -1,6 +1,11 @@
 <?php
 declare(strict_types=1);
 
+/**
+ * Tool Manager - Comments & Discussion API Endpoint
+ * CSRF Protected, Input Validation & Sanitization
+ */
+
 require_once __DIR__ . '/../config/db.php';
 
 $currentUser = requireAuthApi();
@@ -16,7 +21,6 @@ if ($method === 'GET') {
         jsonResponse(['success' => false, 'error' => 'Task ID is required.'], 400);
     }
 
-    // Verify task exists and user has project access
     $stmtCheck = $pdo->prepare("
         SELECT c.project_id
         FROM `tasks` t
@@ -60,6 +64,10 @@ if ($method === 'POST') {
         jsonResponse(['success' => false, 'error' => 'Task ID and comment text are required.'], 400);
     }
 
+    if (mb_strlen($commentText) > 5000) {
+        jsonResponse(['success' => false, 'error' => 'Comment cannot exceed 5000 characters.'], 400);
+    }
+
     // Fetch Task & Project details
     $stmtTask = $pdo->prepare("
         SELECT t.id, t.title, c.project_id
@@ -79,53 +87,56 @@ if ($method === 'POST') {
         jsonResponse(['success' => false, 'error' => 'Access denied.'], 403);
     }
 
-    // Insert comment
-    $stmt = $pdo->prepare("
-        INSERT INTO `comments` (`task_id`, `user_id`, `comment_text`, `created_at`)
-        VALUES (:tid, :uid, :text, NOW())
-    ");
-    $stmt->execute([
-        ':tid'  => $taskId,
-        ':uid'  => $currentUser['id'],
-        ':text' => $commentText
-    ]);
-    $commentId = (int)$pdo->lastInsertId();
+    try {
+        $stmt = $pdo->prepare("
+            INSERT INTO `comments` (`task_id`, `user_id`, `comment_text`, `created_at`)
+            VALUES (:tid, :uid, :text, NOW())
+        ");
+        $stmt->execute([
+            ':tid'  => $taskId,
+            ':uid'  => $currentUser['id'],
+            ':text' => $commentText
+        ]);
+        $commentId = (int)$pdo->lastInsertId();
 
-    // Notify task assignees
-    $stmtAss = $pdo->prepare("SELECT user_id FROM `task_assignments` WHERE task_id = :tid AND user_id != :me");
-    $stmtAss->execute([':tid' => $taskId, ':me' => $currentUser['id']]);
-    $assignees = $stmtAss->fetchAll();
+        // Notify task assignees
+        $stmtAss = $pdo->prepare("SELECT user_id FROM `task_assignments` WHERE task_id = :tid AND user_id != :me");
+        $stmtAss->execute([':tid' => $taskId, ':me' => $currentUser['id']]);
+        $assignees = $stmtAss->fetchAll();
 
-    $snippet = mb_strimwidth($commentText, 0, 50, '...');
-    foreach ($assignees as $a) {
-        createNotification(
-            (int)$a['user_id'],
-            "{$currentUser['username']} commented on {$task['title']}: \"{$snippet}\"",
-            "project.php?id={$projectId}&task={$taskId}",
-            $pdo
-        );
+        $snippet = mb_strimwidth($commentText, 0, 50, '...');
+        foreach ($assignees as $a) {
+            createNotification(
+                (int)$a['user_id'],
+                "{$currentUser['username']} commented on {$task['title']}: \"{$snippet}\"",
+                "project.php?id={$projectId}&task={$taskId}",
+                $pdo
+            );
+        }
+
+        touchProject($projectId, $pdo);
+
+        jsonResponse([
+            'success' => true,
+            'message' => 'Comment posted successfully.',
+            'data'    => [
+                'id'           => $commentId,
+                'task_id'      => $taskId,
+                'user_id'      => $currentUser['id'],
+                'username'     => $currentUser['username'],
+                'avatar_color' => $currentUser['avatar_color'],
+                'comment_text' => $commentText,
+                'created_at'   => date('Y-m-d H:i:s')
+            ]
+        ], 201);
+    } catch (Exception $e) {
+        error_log("Failed to post comment: " . $e->getMessage());
+        jsonResponse(['success' => false, 'error' => 'Failed to post comment.'], 500);
     }
-
-    // Touch project to notify SSE listeners
-    touchProject($projectId, $pdo);
-
-    jsonResponse([
-        'success' => true,
-        'message' => 'Comment posted successfully.',
-        'data'    => [
-            'id'           => $commentId,
-            'task_id'      => $taskId,
-            'user_id'      => $currentUser['id'],
-            'username'     => $currentUser['username'],
-            'avatar_color' => $currentUser['avatar_color'],
-            'comment_text' => htmlspecialchars($commentText, ENT_QUOTES, 'UTF-8'),
-            'created_at'   => date('Y-m-d H:i:s')
-        ]
-    ], 201);
 }
 
 // ============================================================================
-// 3. DELETE: Delete a Comment
+// 3. DELETE: Delete a Comment (Author or Project Admin)
 // ============================================================================
 if ($method === 'DELETE') {
     $input = getJsonInput();
@@ -156,12 +167,17 @@ if ($method === 'DELETE') {
         jsonResponse(['success' => false, 'error' => 'Permission denied.'], 403);
     }
 
-    $stmtDel = $pdo->prepare("DELETE FROM `comments` WHERE id = :cid");
-    $stmtDel->execute([':cid' => $commentId]);
+    try {
+        $stmtDel = $pdo->prepare("DELETE FROM `comments` WHERE id = :cid");
+        $stmtDel->execute([':cid' => $commentId]);
 
-    touchProject((int)$comment['project_id'], $pdo);
+        touchProject((int)$comment['project_id'], $pdo);
 
-    jsonResponse(['success' => true, 'message' => 'Comment deleted successfully.']);
+        jsonResponse(['success' => true, 'message' => 'Comment deleted successfully.']);
+    } catch (Exception $e) {
+        error_log("Failed to delete comment: " . $e->getMessage());
+        jsonResponse(['success' => false, 'error' => 'Failed to delete comment.'], 500);
+    }
 }
 
 jsonResponse(['success' => false, 'error' => 'Method not allowed.'], 405);

@@ -114,6 +114,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
+    document.addEventListener('click', (e) => {
+        const demoBtn = e.target.closest('.demo-pill-btn');
+        if (demoBtn && demoBtn.dataset.demoEmail && demoBtn.dataset.demoPass) {
+            window.fillDemoUser(demoBtn.dataset.demoEmail, demoBtn.dataset.demoPass);
+        }
+    });
+
     // Password visibility toggle
     window.togglePassword = function (inputId, btn) {
         const input = document.getElementById(inputId);
