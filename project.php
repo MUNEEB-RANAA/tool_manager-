@@ -134,6 +134,7 @@ $initialStateJson = json_encode([
     <link rel="stylesheet" href="assets/css/layout.css?v=<?php echo filemtime(__DIR__ . '/assets/css/layout.css'); ?>">
     <link rel="stylesheet" href="assets/css/components.css?v=<?php echo filemtime(__DIR__ . '/assets/css/components.css'); ?>">
     <link rel="stylesheet" href="assets/css/kanban.css?v=<?php echo filemtime(__DIR__ . '/assets/css/kanban.css'); ?>">
+    <link rel="stylesheet" href="assets/css/refinement.css?v=<?php echo filemtime(__DIR__ . '/assets/css/refinement.css'); ?>">
 </head>
 <body class="board-view">
 

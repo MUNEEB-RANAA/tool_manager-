@@ -259,6 +259,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             border-color: rgba(255, 255, 255, 0.16);
         }
     </style>
+    <link rel="stylesheet" href="assets/css/refinement.css?v=<?php echo filemtime(__DIR__ . '/assets/css/refinement.css'); ?>">
 </head>
 <body>
     <div class="auth-page">
